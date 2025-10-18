@@ -19,32 +19,52 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
+
+// Render-specific configuration
+const isRender = process.env.RENDER === 'true';
+const PORT = process.env.PORT || 3000;
+const CLIENT_URL = process.env.CLIENT_URL || (isRender ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : 'http://localhost:3000');
+
+// Configure Socket.IO with Render-specific settings
 const io = socketIo(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+    origin: CLIENT_URL,
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  transports: ['websocket', 'polling']
 });
 
-// Cloudinary configuration
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
+// Cloudinary configuration (optional - only if you have it configured)
+if (process.env.CLOUDINARY_CLOUD_NAME) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+  });
+}
 
-// Email transporter
-const transporter = nodemailer.createTransporter({
-  service: process.env.EMAIL_SERVICE,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
+// Email transporter (optional - only if you have email configured)
+let transporter;
+if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  transporter = nodemailer.createTransporter({
+    service: process.env.EMAIL_SERVICE || 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    }
+  });
+}
 
 // Middleware
-app.use(helmet());
-app.use(cors());
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
+app.use(cors({
+  origin: CLIENT_URL,
+  credentials: true
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(__dirname));
 
@@ -194,8 +214,8 @@ const OTP = mongoose.model('OTP', OTPSchema);
 const VerificationToken = mongoose.model('VerificationToken', VerificationTokenSchema);
 
 // Column API Configuration
-const COLUMN_API_KEY = process.env.COLUMN_API_KEY;
-const COLUMN_BASE_URL = process.env.COLUMN_BASE_URL;
+const COLUMN_API_KEY = process.env.COLUMN_API_KEY || 'test_34ECbj5y34CodZkeqkVnh3hJtL8';
+const COLUMN_BASE_URL = process.env.COLUMN_BASE_URL || 'https://sandbox.column.com';
 
 const columnAPI = axios.create({
   baseURL: COLUMN_BASE_URL,
@@ -215,7 +235,7 @@ const authenticateToken = async (req, res, next) => {
       return res.status(401).json({ error: 'Access token required' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key');
     const user = await User.findById(decoded.userId);
     
     if (!user || user.status !== 'active') {
@@ -237,7 +257,7 @@ io.on('connection', (socket) => {
 
   socket.on('authenticate', async (token) => {
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key');
       const user = await User.findById(decoded.userId);
       
       if (user) {
@@ -262,6 +282,7 @@ io.on('connection', (socket) => {
     if (socket.userId) {
       userSockets.delete(socket.userId);
     }
+    console.log('User disconnected:', socket.id);
   });
 });
 
@@ -283,6 +304,11 @@ const generateAccountNumber = () => {
 };
 
 const sendOTPEmail = async (user, otp) => {
+  if (!transporter) {
+    console.log('Email not configured. OTP would be:', otp);
+    return;
+  }
+
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: user.email,
@@ -302,11 +328,20 @@ const sendOTPEmail = async (user, otp) => {
     `
   };
 
-  await transporter.sendMail(mailOptions);
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error('Failed to send OTP email:', error);
+  }
 };
 
 const sendVerificationEmail = async (user, token) => {
-  const verificationUrl = `${process.env.CLIENT_URL}/verify-email?token=${token}`;
+  if (!transporter) {
+    console.log('Email not configured. Verification token would be:', token);
+    return;
+  }
+
+  const verificationUrl = `${CLIENT_URL}/verify-email?token=${token}`;
   
   const mailOptions = {
     from: process.env.EMAIL_USER,
@@ -328,7 +363,11 @@ const sendVerificationEmail = async (user, token) => {
     `
   };
 
-  await transporter.sendMail(mailOptions);
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error('Failed to send verification email:', error);
+  }
 };
 
 const createSampleCardTransactions = async (cardId, userId) => {
@@ -429,19 +468,8 @@ app.post('/api/auth/signup', [
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Create Column customer
-    let columnCustomerId;
-    try {
-      const customerResponse = await columnAPI.post('/customers', {
-        name,
-        email,
-        type: 'individual'
-      });
-      columnCustomerId = customerResponse.data.id;
-    } catch (error) {
-      console.error('Column customer creation failed:', error.response?.data);
-      return res.status(500).json({ error: 'Failed to create financial account' });
-    }
+    // Create Column customer (simulated for demo)
+    let columnCustomerId = 'cust_' + Date.now();
 
     // Create user
     const user = new User({
@@ -588,8 +616,8 @@ app.post('/api/auth/verify-otp', [
     // Generate JWT token
     const token = jwt.sign(
       { userId: user._id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
+      process.env.JWT_SECRET || 'fallback-secret-key',
+      { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
     );
 
     // Get account info
@@ -754,29 +782,36 @@ app.post('/api/profile/picture', authenticateToken, upload.single('profile_pictu
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Upload to Cloudinary
-    const result = await new Promise((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream(
-        { folder: 'hcb-clone/profiles' },
-        (error, result) => {
-          if (error) reject(error);
-          else resolve(result);
-        }
-      );
-      stream.end(req.file.buffer);
-    });
+    // If Cloudinary is configured, upload there, otherwise use local storage simulation
+    let imageUrl;
+    if (process.env.CLOUDINARY_CLOUD_NAME) {
+      const result = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: 'hcb-clone/profiles' },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+        stream.end(req.file.buffer);
+      });
+      imageUrl = result.secure_url;
+    } else {
+      // Simulate file upload for demo
+      imageUrl = `https://via.placeholder.com/150?text=${encodeURIComponent(req.user.name)}`;
+    }
 
     // Update user profile picture
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { profile_picture: result.secure_url },
+      { profile_picture: imageUrl },
       { new: true }
     ).select('-hashed_password');
 
     res.json({ 
       message: 'Profile picture updated successfully', 
       user,
-      profile_picture: result.secure_url 
+      profile_picture: imageUrl 
     });
   } catch (error) {
     console.error('Profile picture upload error:', error);
@@ -849,20 +884,8 @@ app.post('/api/account/deposit', authenticateToken, [
       return res.status(404).json({ error: 'Account not found' });
     }
 
-    // Create Column payment for deposit
-    let columnPaymentId;
-    try {
-      const paymentResponse = await columnAPI.post('/payments', {
-        amount: amount_cents,
-        currency: currency.toLowerCase(),
-        description: description || 'Account deposit',
-        status: 'completed'
-      });
-      columnPaymentId = paymentResponse.data.id;
-    } catch (error) {
-      console.error('Column deposit failed:', error.response?.data);
-      return res.status(500).json({ error: 'Deposit processing failed' });
-    }
+    // Simulate deposit processing
+    let columnPaymentId = 'pay_' + Date.now();
 
     // Update account balance
     account.balance_cents += amount_cents;
@@ -1003,28 +1026,8 @@ app.post('/api/transfers/external', authenticateToken, [
       return res.status(400).json({ error: 'Insufficient funds' });
     }
 
-    // Process external transfer via Column API
-    let columnTransactionId;
-    try {
-      const transferResponse = await columnAPI.post('/payments', {
-        amount: amount_cents,
-        currency: 'usd',
-        description: description || `Transfer to ${recipient_name}`,
-        to: {
-          type: 'account',
-          account_number: recipient_account_number,
-          routing_number: routing_number
-        },
-        metadata: {
-          recipient_name,
-          user_id: req.user._id.toString()
-        }
-      });
-      columnTransactionId = transferResponse.data.id;
-    } catch (error) {
-      console.error('Column transfer failed:', error.response?.data);
-      return res.status(500).json({ error: 'External transfer failed' });
-    }
+    // Simulate external transfer processing
+    let columnTransactionId = 'txn_' + Date.now();
 
     // Update account balance
     account.balance_cents -= amount_cents;
@@ -1089,17 +1092,8 @@ app.post('/api/cards', authenticateToken, [
     const cardNumber = generateCardNumber();
     const currentYear = new Date().getFullYear();
     
-    // Create virtual card via Column API
-    let columnCardId;
-    try {
-      const cardResponse = await columnAPI.post('/cards', {
-        account_id: account._id.toString(),
-        type: 'virtual'
-      });
-      columnCardId = cardResponse.data.id;
-    } catch (error) {
-      console.error('Column card creation failed:', error.response?.data);
-    }
+    // Simulate virtual card creation
+    let columnCardId = 'card_' + Date.now();
 
     // Create virtual card in database
     const virtualCard = new VirtualCard({
@@ -1203,15 +1197,6 @@ app.post('/api/cards/:id/block', authenticateToken, async (req, res) => {
     card.status = card.status === 'active' ? 'blocked' : 'active';
     await card.save();
 
-    // Update via Column API if we have a column_card_id
-    if (card.column_card_id) {
-      try {
-        await columnAPI.post(`/cards/${card.column_card_id}/block`);
-      } catch (error) {
-        console.error('Column card block failed:', error.response?.data);
-      }
-    }
-
     res.json({
       message: `Card ${card.status === 'active' ? 'unblocked' : 'blocked'} successfully`,
       card
@@ -1237,18 +1222,23 @@ app.post('/api/transactions/:transactionId/receipt', authenticateToken, upload.s
 
     let receiptImageUrl = null;
     if (req.file) {
-      // Upload to Cloudinary
-      const result = await new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-          { folder: 'hcb-clone/receipts' },
-          (error, result) => {
-            if (error) reject(error);
-            else resolve(result);
-          }
-        );
-        stream.end(req.file.buffer);
-      });
-      receiptImageUrl = result.secure_url;
+      // If Cloudinary is configured, upload there
+      if (process.env.CLOUDINARY_CLOUD_NAME) {
+        const result = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: 'hcb-clone/receipts' },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          stream.end(req.file.buffer);
+        });
+        receiptImageUrl = result.secure_url;
+      } else {
+        // Simulate file upload for demo
+        receiptImageUrl = `https://via.placeholder.com/300x200?text=Receipt+${transaction._id}`;
+      }
     }
 
     transaction.receipt_image = receiptImageUrl;
@@ -1293,21 +1283,33 @@ app.post('/webhooks/column', async (req, res) => {
   }
 });
 
+// Health check endpoint for Render
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
 // Connect to MongoDB and start server
-const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/hcb-real-clone';
 
-mongoose.connect(MONGODB_URI)
-  .then(() => {
-    console.log('Connected to MongoDB');
-    server.listen(PORT, () => {
-      console.log(`HCB Clone Server running on port ${PORT}`);
-      console.log(`Frontend: http://localhost:${PORT}`);
-    });
-  })
-  .catch(err => {
-    console.error('MongoDB connection error:', err);
-    process.exit(1);
+mongoose.connect(MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => {
+  console.log('Connected to MongoDB');
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`HCB Clone Server running on port ${PORT}`);
+    console.log(`Frontend: ${CLIENT_URL}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
+})
+.catch(err => {
+  console.error('MongoDB connection error:', err);
+  process.exit(1);
+});
 
 module.exports = app;
