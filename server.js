@@ -14,28 +14,27 @@ const server = http.createServer(app);
 
 // Configuration
 const PORT = process.env.PORT || 3000;
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key-2024';
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/hcb-real-clone';
 
 console.log('🔧 Environment Check:');
 console.log('MONGODB_URI:', process.env.MONGODB_URI ? '✅ Set' : '❌ Not set');
 console.log('JWT_SECRET:', process.env.JWT_SECRET ? '✅ Set' : '❌ Not set');
-console.log('CLIENT_URL:', process.env.CLIENT_URL || 'Using default');
 
-// Configure Socket.IO
+// Configure Socket.IO with proper CORS
 const io = socketIo(server, {
   cors: {
-    origin: CLIENT_URL,
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
 
-// Middleware
+// Middleware - CORS first
 app.use(cors({
-  origin: CLIENT_URL,
+  origin: "*",
   credentials: true
 }));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(__dirname));
 
@@ -131,14 +130,14 @@ const generateCVV = () => {
 
 // Auth middleware
 const authenticateToken = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
-  }
-
   try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({ error: 'Access token required' });
+    }
+
     const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.userId);
     
@@ -154,11 +153,8 @@ const authenticateToken = async (req, res, next) => {
 };
 
 // Routes
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
 
-// Health check with detailed info
+// Health check
 app.get('/health', (req, res) => {
   const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
   
@@ -166,17 +162,19 @@ app.get('/health', (req, res) => {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     database: dbStatus,
-    environment: process.env.NODE_ENV || 'development',
-    mongodb_uri_set: !!process.env.MONGODB_URI,
-    message: dbStatus === 'connected' ? 
-      'Database connected successfully!' : 
-      'Database not connected. Please check MONGODB_URI environment variable.'
+    environment: process.env.NODE_ENV || 'development'
   });
+});
+
+// Serve frontend for root route
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // Auth Routes
 app.post('/api/auth/signup', async (req, res) => {
   try {
+    console.log('Signup request:', req.body);
     const { email, password, name, phone } = req.body;
 
     // Validate input
@@ -213,7 +211,7 @@ app.post('/api/auth/signup', async (req, res) => {
 
     await account.save();
 
-    // Generate OTP (in real app, send via email)
+    // Generate OTP
     const otp = generateOTP();
     const otpRecord = new OTP({
       user_id: user._id,
@@ -223,7 +221,7 @@ app.post('/api/auth/signup', async (req, res) => {
 
     await otpRecord.save();
 
-    console.log(`OTP for ${email}: ${otp}`); // In production, send via email
+    console.log(`OTP for ${email}: ${otp}`);
 
     res.status(201).json({
       message: 'User created successfully. Please verify your email with OTP.',
@@ -233,12 +231,13 @@ app.post('/api/auth/signup', async (req, res) => {
 
   } catch (error) {
     console.error('Signup error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
 app.post('/api/auth/login', async (req, res) => {
   try {
+    console.log('Login request:', req.body);
     const { email, password } = req.body;
 
     if (!email || !password) {
@@ -271,7 +270,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     await otpRecord.save();
 
-    console.log(`OTP for ${email}: ${otp}`); // In production, send via email
+    console.log(`OTP for ${email}: ${otp}`);
 
     res.json({
       message: 'OTP sent to your email',
@@ -281,12 +280,13 @@ app.post('/api/auth/login', async (req, res) => {
 
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
 app.post('/api/auth/verify-otp', async (req, res) => {
   try {
+    console.log('Verify OTP request:', req.body);
     const { user_id, otp } = req.body;
 
     if (!user_id || !otp) {
@@ -345,7 +345,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
 
   } catch (error) {
     console.error('OTP verification error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -376,7 +376,7 @@ app.post('/api/auth/resend-otp', async (req, res) => {
 
     await otpRecord.save();
 
-    console.log(`New OTP for ${user.email}: ${otp}`); // In production, send via email
+    console.log(`New OTP for ${user.email}: ${otp}`);
 
     res.json({
       message: 'New OTP sent to your email',
@@ -385,7 +385,7 @@ app.post('/api/auth/resend-otp', async (req, res) => {
 
   } catch (error) {
     console.error('Resend OTP error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -419,7 +419,7 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Profile error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -452,7 +452,7 @@ app.put('/api/profile', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Profile update error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -485,7 +485,7 @@ app.get('/api/account/transactions', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Transactions error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -533,7 +533,7 @@ app.post('/api/account/deposit', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Deposit error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -617,7 +617,7 @@ app.post('/api/account/transfer', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Transfer error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -645,7 +645,7 @@ app.get('/api/cards', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Get cards error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -694,7 +694,7 @@ app.post('/api/cards', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Create card error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -742,7 +742,7 @@ app.get('/api/cards/:cardId', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Get card error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -771,7 +771,7 @@ app.post('/api/cards/:cardId/block', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Block card error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -825,8 +825,13 @@ app.post('/api/transfers/external', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('External transfer error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
+});
+
+// Handle all other routes - serve the frontend
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // Socket.IO authentication
@@ -855,19 +860,14 @@ const connectToDatabase = async () => {
     
     if (!process.env.MONGODB_URI) {
       console.log('❌ MONGODB_URI environment variable is not set');
-      console.log('💡 Please add MONGODB_URI to your Render environment variables');
+      console.log('💡 Please set MONGODB_URI in your environment variables');
       return;
     }
 
-    await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    
+    await mongoose.connect(process.env.MONGODB_URI);
     console.log('✅ Successfully connected to MongoDB!');
   } catch (error) {
     console.log('❌ MongoDB connection failed:', error.message);
-    console.log('💡 Please check your MONGODB_URI in Render environment variables');
   }
 };
 
@@ -878,20 +878,13 @@ const startServer = async () => {
   server.listen(PORT, '0.0.0.0', () => {
     console.log('\n🚀 HCB Clone Server Started');
     console.log(`📍 Port: ${PORT}`);
-    console.log(`🌐 URL: ${CLIENT_URL}`);
     console.log(`📊 Database: ${mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Not Connected ❌'}`);
     
     if (mongoose.connection.readyState === 1) {
       console.log('🎉 All systems ready! Your banking app is fully functional.');
-    } else {
-      console.log('\n🔧 To fix database connection:');
-      console.log('   1. Go to Render Dashboard → Your Service → Environment');
-      console.log('   2. Add MONGODB_URI environment variable');
-      console.log('   3. Value: mongodb+srv://sandeshkadel:Sandesh@123@sandesh.2u8wyot.mongodb.net/hcb-clone?retryWrites=true&w=majority&appName=sandesh');
-      console.log('   4. Wait for automatic redeploy');
     }
     
-    console.log(`\n🔗 Health Check: ${CLIENT_URL}/health`);
+    console.log(`\n🔗 Health Check: http://localhost:${PORT}/health`);
   });
 };
 
