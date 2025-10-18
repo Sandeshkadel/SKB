@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: hcb-clone
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        fromDatabase:
+          name: hcb-mongodb
+          property: connectionString
