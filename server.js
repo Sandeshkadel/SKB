@@ -16,6 +16,9 @@ const PORT = process.env.PORT || 3000;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key-2024';
 
+// MongoDB Configuration
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/hcb-real-clone';
+
 // Configure Socket.IO
 const io = socketIo(server, {
   cors: {
@@ -35,15 +38,6 @@ app.use(express.static(__dirname));
 // Simple OTP Generator
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
-};
-
-// Simple UUID generator (replacement for uuid package)
-const generateUUID = () => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c == 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
 };
 
 // Input validation helper
@@ -282,9 +276,30 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// Demo route to show app is working even without MongoDB
+app.get('/api/demo', (req, res) => {
+  res.json({
+    message: 'HCB Clone is running!',
+    status: 'OK',
+    features: ['OTP Authentication', 'Money Transfers', 'Virtual Cards', 'Real-time Updates'],
+    setup_required: !process.env.MONGODB_URI,
+    instructions: process.env.MONGODB_URI ? 
+      'MongoDB is configured. Ready to use!' : 
+      'Please set MONGODB_URI environment variable with your MongoDB connection string'
+  });
+});
+
 // Auth Routes
 app.post('/api/auth/signup', async (req, res) => {
   try {
+    // Check if MongoDB is connected
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ 
+        error: 'Database not connected', 
+        message: 'Please set up MongoDB Atlas and add MONGODB_URI environment variable' 
+      });
+    }
+
     const { email, password, name, phone } = req.body;
 
     // Input validation
@@ -333,6 +348,14 @@ app.post('/api/auth/signup', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
+    // Check if MongoDB is connected
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ 
+        error: 'Database not connected', 
+        message: 'Please set up MongoDB Atlas and add MONGODB_URI environment variable' 
+      });
+    }
+
     const { email, password } = req.body;
 
     // Input validation
@@ -811,28 +834,66 @@ app.post('/api/cards/:id/block', authenticateToken, async (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+  
   res.status(200).json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    database: dbStatus,
+    environment: process.env.NODE_ENV || 'development',
+    message: dbStatus === 'connected' ? 
+      'Ready to use!' : 
+      'Please set MONGODB_URI environment variable'
   });
 });
 
-// Connect to MongoDB and start server
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/hcb-real-clone';
+// Connect to MongoDB with better error handling
+const connectToDatabase = async () => {
+  try {
+    if (!MONGODB_URI || MONGODB_URI === 'mongodb://localhost:27017/hcb-real-clone') {
+      console.log('⚠️  MONGODB_URI not set. Using demo mode without database.');
+      console.log('💡 To enable full functionality:');
+      console.log('   1. Create a free MongoDB Atlas account at https://cloud.mongodb.com');
+      console.log('   2. Create a cluster and get your connection string');
+      console.log('   3. Add MONGODB_URI environment variable in Render');
+      console.log('   4. Your app will automatically reconnect when MongoDB is available');
+      return;
+    }
 
-mongoose.connect(MONGODB_URI)
-.then(() => {
-  console.log('Connected to MongoDB');
+    if (!MONGODB_URI.startsWith('mongodb://') && !MONGODB_URI.startsWith('mongodb+srv://')) {
+      console.log('❌ Invalid MongoDB connection string. Must start with mongodb:// or mongodb+srv://');
+      return;
+    }
+
+    await mongoose.connect(MONGODB_URI);
+    console.log('✅ Connected to MongoDB');
+  } catch (error) {
+    console.log('❌ MongoDB connection failed:', error.message);
+    console.log('💡 Please check your MONGODB_URI environment variable');
+  }
+};
+
+// Start server
+const startServer = async () => {
+  await connectToDatabase();
+  
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`HCB Clone Server running on port ${PORT}`);
-    console.log(`Frontend: ${CLIENT_URL}`);
-    console.log('All features available: OTP Auth, Transfers, Virtual Cards, Real-time Updates');
+    console.log(`🚀 HCB Clone Server running on port ${PORT}`);
+    console.log(`🌐 Frontend: ${CLIENT_URL}`);
+    console.log(`📊 Database: ${mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Not Connected ⚠️'}`);
+    
+    if (mongoose.connection.readyState === 1) {
+      console.log('🎉 All features available: OTP Auth, Transfers, Virtual Cards, Real-time Updates');
+    } else {
+      console.log('💡 Demo mode: App is running but database features are disabled');
+      console.log('   Set MONGODB_URI environment variable to enable full functionality');
+    }
+    
+    console.log(`🔗 Health check: ${CLIENT_URL}/health`);
+    console.log(`🔗 Demo info: ${CLIENT_URL}/api/demo`);
   });
-})
-.catch(err => {
-  console.error('MongoDB connection error:', err);
-  process.exit(1);
-});
+};
+
+startServer().catch(console.error);
 
 module.exports = app;
