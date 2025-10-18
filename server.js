@@ -186,6 +186,32 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Test database connection
+app.get('/api/test-db', async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ 
+        error: 'Database not connected',
+        message: 'Please check MONGODB_URI environment variable'
+      });
+    }
+
+    // Test by counting users
+    const userCount = await User.countDocuments();
+    
+    res.json({
+      message: 'Database connection successful!',
+      user_count: userCount,
+      database_status: 'connected'
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Database test failed',
+      message: error.message
+    });
+  }
+});
+
 // Auth Routes
 app.post('/api/auth/signup', async (req, res) => {
   try {
@@ -841,7 +867,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// Connect to MongoDB
+// Connect to MongoDB with better error handling
 const connectToDatabase = async () => {
   try {
     console.log('🔗 Attempting to connect to MongoDB...');
@@ -849,24 +875,37 @@ const connectToDatabase = async () => {
     if (!process.env.MONGODB_URI) {
       console.log('❌ MONGODB_URI environment variable is not set');
       console.log('💡 Please add MONGODB_URI to your Render environment variables');
-      return;
+      return false;
     }
 
-    await mongoose.connect(process.env.MONGODB_URI, {
+    // Improved connection options
+    const options = {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-    });
+      serverSelectionTimeoutMS: 5000, // 5 seconds
+      socketTimeoutMS: 45000, // 45 seconds
+      maxPoolSize: 10,
+    };
+
+    await mongoose.connect(process.env.MONGODB_URI, options);
     
     console.log('✅ Successfully connected to MongoDB!');
+    return true;
   } catch (error) {
     console.log('❌ MongoDB connection failed:', error.message);
     console.log('💡 Please check your MONGODB_URI in Render environment variables');
+    return false;
   }
 };
 
 // Start server
 const startServer = async () => {
-  await connectToDatabase();
+  const dbConnected = await connectToDatabase();
+  
+  if (!dbConnected) {
+    console.log('⚠️  Starting server without database connection');
+    console.log('📝 Some features will not work until database is connected');
+  }
   
   server.listen(PORT, '0.0.0.0', () => {
     console.log('\n🚀 HCB Clone Server Started');
@@ -874,17 +913,8 @@ const startServer = async () => {
     console.log(`🌐 URL: ${CLIENT_URL}`);
     console.log(`📊 Database: ${mongoose.connection.readyState === 1 ? 'Connected ✅' : 'Not Connected ❌'}`);
     
-    if (mongoose.connection.readyState === 1) {
-      console.log('🎉 All systems ready! Your banking app is fully functional.');
-    } else {
-      console.log('\n🔧 To fix database connection:');
-      console.log('   1. Go to Render Dashboard → Your Service → Environment');
-      console.log('   2. Add MONGODB_URI environment variable');
-      console.log('   3. Value: mongodb+srv://your-username:your-password@your-cluster.mongodb.net/hcb-clone');
-      console.log('   4. Wait for automatic redeploy');
-    }
-    
     console.log(`\n🔗 Health Check: ${CLIENT_URL}/health`);
+    console.log(`🔗 Test Database: ${CLIENT_URL}/api/test-db`);
   });
 };
 
