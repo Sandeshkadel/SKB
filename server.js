@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 const express = require('express');
-const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const socketIo = require('socket.io');
 const http = require('http');
@@ -26,6 +26,15 @@ const io = socketIo(server, {
   }
 });
 
+// Email transporter
+const emailTransporter = nodemailer.createTransporter({
+  service: 'gmail',
+  auth: {
+    user: 'sandeshkadel2314@gmail.com',
+    pass: process.env.EMAIL_PASSWORD
+  }
+});
+
 // Middleware
 app.use(cors({
   origin: CLIENT_URL,
@@ -40,6 +49,7 @@ const accounts = new Map();
 const transactions = new Map();
 const cards = new Map();
 const otps = new Map();
+const sessions = new Map();
 
 // Valid Visa BIN ranges
 const VISA_BINS = [
@@ -97,6 +107,45 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+// Send OTP Email
+const sendOTPEmail = async (email, name, otp) => {
+  try {
+    const mailOptions = {
+      from: 'sandeshkadel2314@gmail.com',
+      to: email,
+      subject: 'Your HCB Clone OTP Code',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%); padding: 20px; text-align: center; color: white;">
+            <h1>HCB Clone</h1>
+          </div>
+          <div style="padding: 20px; background: #f9f9f9;">
+            <h2>Hello ${name},</h2>
+            <p>Your One-Time Password (OTP) for HCB Clone is:</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <div style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #7C3AED; background: white; padding: 15px; border-radius: 8px; display: inline-block;">
+                ${otp}
+              </div>
+            </div>
+            <p>This OTP is valid for 10 minutes. Please do not share it with anyone.</p>
+            <p>Welcome again to HCB Clone!</p>
+          </div>
+          <div style="background: #333; color: white; padding: 15px; text-align: center;">
+            <p>&copy; 2024 HCB Clone. All rights reserved.</p>
+          </div>
+        </div>
+      `
+    };
+
+    await emailTransporter.sendMail(mailOptions);
+    console.log(`✅ OTP email sent to ${email}`);
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to send OTP email:', error);
+    return false;
+  }
+};
+
 // Auth middleware
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -109,10 +158,19 @@ const authenticateToken = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const user = users.get(decoded.userId);
+    
     if (!user) {
       return res.status(401).json({ error: 'Invalid token' });
     }
+
+    // Check if session exists and is valid (3 days)
+    const session = sessions.get(decoded.sessionId);
+    if (!session || Date.now() - session.created_at > 3 * 24 * 60 * 60 * 1000) {
+      return res.status(401).json({ error: 'Session expired. Please login again.' });
+    }
+
     req.user = user;
+    req.sessionId = decoded.sessionId;
     next();
   } catch (error) {
     return res.status(403).json({ error: 'Invalid or expired token' });
@@ -146,7 +204,7 @@ app.get('/api/test', (req, res) => {
 // Auth Routes
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    const { email, password, name, phone } = req.body;
+    const { email, name, phone } = req.body;
 
     // Check if user exists
     for (let user of users.values()) {
@@ -155,8 +213,6 @@ app.post('/api/auth/signup', async (req, res) => {
       }
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 12);
     const userId = 'user_' + Date.now();
 
     // Create user
@@ -164,7 +220,6 @@ app.post('/api/auth/signup', async (req, res) => {
       _id: userId,
       email: email.toLowerCase(),
       name,
-      hashed_password: hashedPassword,
       phone,
       status: 'pending',
       email_verified: false,
@@ -174,14 +229,14 @@ app.post('/api/auth/signup', async (req, res) => {
 
     users.set(userId, user);
 
-    // Create account - Start with $0 balance
+    // Create account - Start with $1000 balance for testing
     const accountId = 'acc_' + Date.now();
     const account = {
       _id: accountId,
       user_id: userId,
       account_number: generateAccountNumber(),
       routing_number: generateRoutingNumber(),
-      balance_cents: 0, // Start with $0
+      balance_cents: 100000, // Start with $1000 for testing
       currency: 'USD',
       status: 'active',
       created_at: new Date()
@@ -201,11 +256,21 @@ app.post('/api/auth/signup', async (req, res) => {
 
     otps.set(userId + '_' + otp, otpRecord);
 
+    // Send OTP via email
+    const emailSent = await sendOTPEmail(email, name, otp);
+
+    if (!emailSent) {
+      // Clean up if email fails
+      users.delete(userId);
+      accounts.delete(accountId);
+      return res.status(500).json({ error: 'Failed to send OTP email. Please try again.' });
+    }
+
     console.log(`✅ User created: ${email}`);
-    console.log(`📧 OTP for ${email}: ${otp}`);
+    console.log(`📧 OTP sent to ${email}: ${otp}`);
 
     res.status(201).json({
-      message: 'User created successfully. Please check your email for OTP.',
+      message: 'User created successfully. OTP sent to your email.',
       user_id: userId,
       email: user.email
     });
@@ -218,7 +283,7 @@ app.post('/api/auth/signup', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email } = req.body;
 
     // Find user
     let user = null;
@@ -230,13 +295,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     if (!user) {
-      return res.status(400).json({ error: 'Invalid email or password' });
-    }
-
-    // Check password
-    const isValidPassword = await bcrypt.compare(password, user.hashed_password);
-    if (!isValidPassword) {
-      return res.status(400).json({ error: 'Invalid email or password' });
+      return res.status(400).json({ error: 'User not found. Please sign up first.' });
     }
 
     // Generate OTP
@@ -258,7 +317,14 @@ app.post('/api/auth/login', async (req, res) => {
 
     otps.set(user._id + '_' + otp, otpRecord);
 
-    console.log(`📧 OTP for ${email}: ${otp}`);
+    // Send OTP via email
+    const emailSent = await sendOTPEmail(user.email, user.name, otp);
+
+    if (!emailSent) {
+      return res.status(500).json({ error: 'Failed to send OTP email. Please try again.' });
+    }
+
+    console.log(`📧 Login OTP sent to ${email}: ${otp}`);
 
     res.json({
       message: 'OTP sent to your email',
@@ -303,11 +369,25 @@ app.post('/api/auth/verify-otp', async (req, res) => {
       }
     }
 
-    // Generate JWT token
+    // Create session
+    const sessionId = 'session_' + Date.now();
+    const session = {
+      _id: sessionId,
+      user_id: user_id,
+      created_at: Date.now(),
+      expires_at: Date.now() + (3 * 24 * 60 * 60 * 1000) // 3 days
+    };
+    sessions.set(sessionId, session);
+
+    // Generate JWT token with session info
     const token = jwt.sign(
-      { userId: user._id, email: user.email },
+      { 
+        userId: user._id, 
+        email: user.email,
+        sessionId: sessionId 
+      },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '3 days' }
     );
 
     res.json({
@@ -364,7 +444,14 @@ app.post('/api/auth/resend-otp', async (req, res) => {
 
     otps.set(user._id + '_' + otp, otpRecord);
 
-    console.log(`📧 New OTP for ${user.email}: ${otp}`);
+    // Send OTP via email
+    const emailSent = await sendOTPEmail(user.email, user.name, otp);
+
+    if (!emailSent) {
+      return res.status(500).json({ error: 'Failed to send OTP email. Please try again.' });
+    }
+
+    console.log(`📧 New OTP sent to ${user.email}: ${otp}`);
 
     res.json({
       message: 'New OTP sent to your email',
@@ -375,6 +462,18 @@ app.post('/api/auth/resend-otp', async (req, res) => {
     console.error('Resend OTP error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// Check session validity
+app.get('/api/auth/check-session', authenticateToken, (req, res) => {
+  res.json({
+    valid: true,
+    user: {
+      _id: req.user._id,
+      email: req.user.email,
+      name: req.user.name
+    }
+  });
 });
 
 // Profile Routes
@@ -659,6 +758,7 @@ app.post('/api/cards', authenticateToken, (req, res) => {
       cvv: generateCVV(),
       brand: 'Visa',
       status: 'active',
+      balance_cents: 0, // Card-specific balance
       billing_address: {
         street: '123 Main St',
         city: 'New York',
@@ -685,6 +785,7 @@ app.post('/api/cards', authenticateToken, (req, res) => {
         cvv: card.cvv,
         brand: card.brand,
         status: card.status,
+        balance_cents: card.balance_cents,
         billing_address: card.billing_address,
         phone_number: card.phone_number,
         card_type: card.card_type,
@@ -722,13 +823,14 @@ app.get('/api/cards/:cardId', authenticateToken, (req, res) => {
     res.json({
       card: {
         _id: card._id,
-        card_number: card.card_number, // Return full card number for details view
+        card_number: card.card_number,
         last4: card.last4,
         expiry_month: card.expiry_month,
         expiry_year: card.expiry_year,
         cvv: card.cvv,
         brand: card.brand,
         status: card.status,
+        balance_cents: card.balance_cents,
         billing_address: card.billing_address,
         phone_number: card.phone_number,
         card_type: card.card_type,
@@ -771,6 +873,156 @@ app.post('/api/cards/:cardId/block', authenticateToken, (req, res) => {
   }
 });
 
+// Add funds to card
+app.post('/api/cards/:cardId/fund', authenticateToken, (req, res) => {
+  try {
+    const { amount_cents } = req.body;
+    const card = cards.get(req.params.cardId);
+
+    if (!card || card.user_id !== req.user._id) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    // Get user account
+    let account = null;
+    for (let acc of accounts.values()) {
+      if (acc.user_id === req.user._id) {
+        account = acc;
+        break;
+      }
+    }
+
+    // Check account balance
+    if (account.balance_cents < amount_cents) {
+      return res.status(400).json({ error: 'Insufficient account balance' });
+    }
+
+    // Transfer funds from account to card
+    account.balance_cents -= amount_cents;
+    card.balance_cents += amount_cents;
+
+    accounts.set(account._id, account);
+    cards.set(card._id, card);
+
+    // Create transaction
+    const transactionId = 'txn_' + Date.now();
+    const transaction = {
+      _id: transactionId,
+      user_id: req.user._id,
+      account_id: account._id,
+      card_id: card._id,
+      amount_cents: -amount_cents,
+      currency: 'USD',
+      type: 'card_funding',
+      description: `Fund card ${card.last4}`,
+      status: 'completed',
+      created_at: new Date()
+    };
+
+    transactions.set(transactionId, transaction);
+
+    // Emit balance updates
+    io.emit('balance_update', {
+      user_id: req.user._id,
+      balance_cents: account.balance_cents
+    });
+
+    res.json({
+      message: 'Card funded successfully',
+      card_balance: card.balance_cents,
+      account_balance: account.balance_cents
+    });
+
+  } catch (error) {
+    console.error('Card funding error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Transfer between cards
+app.post('/api/cards/transfer', authenticateToken, (req, res) => {
+  try {
+    const { from_card_id, to_card_number, amount_cents, description } = req.body;
+
+    // Find source card
+    const fromCard = cards.get(from_card_id);
+    if (!fromCard || fromCard.user_id !== req.user._id) {
+      return res.status(404).json({ error: 'Source card not found' });
+    }
+
+    // Check card balance
+    if (fromCard.balance_cents < amount_cents) {
+      return res.status(400).json({ error: 'Insufficient card balance' });
+    }
+
+    // Find destination card by card number
+    let toCard = null;
+    for (let card of cards.values()) {
+      if (card.card_number === to_card_number) {
+        toCard = card;
+        break;
+      }
+    }
+
+    if (!toCard) {
+      return res.status(404).json({ error: 'Destination card not found' });
+    }
+
+    if (fromCard._id === toCard._id) {
+      return res.status(400).json({ error: 'Cannot transfer to the same card' });
+    }
+
+    // Transfer funds between cards
+    fromCard.balance_cents -= amount_cents;
+    toCard.balance_cents += amount_cents;
+
+    cards.set(fromCard._id, fromCard);
+    cards.set(toCard._id, toCard);
+
+    // Create transactions for both cards
+    const fromTransactionId = 'txn_' + Date.now();
+    const fromTransaction = {
+      _id: fromTransactionId,
+      user_id: req.user._id,
+      card_id: fromCard._id,
+      amount_cents: -amount_cents,
+      currency: 'USD',
+      type: 'card_transfer',
+      description: description || `Transfer to card ${toCard.last4}`,
+      status: 'completed',
+      counterparty_card: toCard.last4,
+      created_at: new Date()
+    };
+
+    const toTransactionId = 'txn_' + (Date.now() + 1);
+    const toTransaction = {
+      _id: toTransactionId,
+      user_id: toCard.user_id,
+      card_id: toCard._id,
+      amount_cents: amount_cents,
+      currency: 'USD',
+      type: 'card_transfer',
+      description: description || `Transfer from card ${fromCard.last4}`,
+      status: 'completed',
+      counterparty_card: fromCard.last4,
+      created_at: new Date()
+    };
+
+    transactions.set(fromTransactionId, fromTransaction);
+    transactions.set(toTransactionId, toTransaction);
+
+    res.json({
+      message: 'Card transfer successful',
+      from_card_balance: fromCard.balance_cents,
+      to_card_balance: toCard.balance_cents
+    });
+
+  } catch (error) {
+    console.error('Card transfer error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Delete card endpoint
 app.delete('/api/cards/:cardId', authenticateToken, (req, res) => {
   try {
@@ -780,12 +1032,52 @@ app.delete('/api/cards/:cardId', authenticateToken, (req, res) => {
       return res.status(404).json({ error: 'Card not found' });
     }
 
+    // Return card balance to account if any
+    if (card.balance_cents > 0) {
+      let account = null;
+      for (let acc of accounts.values()) {
+        if (acc.user_id === req.user._id) {
+          account = acc;
+          break;
+        }
+      }
+
+      if (account) {
+        account.balance_cents += card.balance_cents;
+        accounts.set(account._id, account);
+
+        // Create transaction for balance return
+        const transactionId = 'txn_' + Date.now();
+        const transaction = {
+          _id: transactionId,
+          user_id: req.user._id,
+          account_id: account._id,
+          card_id: card._id,
+          amount_cents: card.balance_cents,
+          currency: 'USD',
+          type: 'card_closure',
+          description: `Balance return from card ${card.last4}`,
+          status: 'completed',
+          created_at: new Date()
+        };
+
+        transactions.set(transactionId, transaction);
+
+        // Emit balance update
+        io.emit('balance_update', {
+          user_id: req.user._id,
+          balance_cents: account.balance_cents
+        });
+      }
+    }
+
     // Delete the card
     cards.delete(req.params.cardId);
 
     res.json({
       message: 'Card deleted successfully',
-      card_id: req.params.cardId
+      card_id: req.params.cardId,
+      balance_returned: card.balance_cents
     });
 
   } catch (error) {
@@ -905,16 +1197,18 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('\n🎉 HCB Clone Server Started Successfully!');
   console.log(`📍 Port: ${PORT}`);
   console.log(`🌐 URL: ${CLIENT_URL}`);
+  console.log(`📧 Email: OTPs will be sent from sandeshkadel2314@gmail.com`);
   console.log(`💾 Storage: In-memory (No database required)`);
   console.log(`\n🔗 Health Check: ${CLIENT_URL}/health`);
   console.log(`🔗 API Test: ${CLIENT_URL}/api/test`);
   console.log('\n✅ Your banking app is now fully functional!');
   console.log('💡 Features working:');
-  console.log('   - User registration & login with OTP');
-  console.log('   - Real money transfers (start with $0)');
-  console.log('   - Valid virtual card creation');
-  console.log('   - External bank transfers');
+  console.log('   - OTP-based authentication (no passwords)');
+  console.log('   - Real OTP emails sent to users');
+  console.log('   - 3-day session validity');
+  console.log('   - Card-specific balances');
+  console.log('   - Card-to-card transfers');
+  console.log('   - Valid virtual card numbers');
+  console.log('   - Real money transfers');
   console.log('   - Card management (create, view, block, delete)');
-  console.log('   - Balance management');
-  console.log('   - Transaction history');
 });
