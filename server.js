@@ -1,4 +1,4 @@
-require('dotenv').config();
+// Core dependencies only - no uuid, no express-validator, etc.
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -6,9 +6,6 @@ const jwt = require('jsonwebtoken');
 const socketIo = require('socket.io');
 const http = require('http');
 const cors = require('cors');
-const axios = require('axios');
-const { v4: uuidv4 } = require('uuid');
-const { body, validationResult } = require('express-validator');
 const path = require('path');
 
 const app = express();
@@ -17,13 +14,13 @@ const server = http.createServer(app);
 // Configuration
 const PORT = process.env.PORT || 3000;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key-2024';
 
 // Configure Socket.IO
 const io = socketIo(server, {
   cors: {
     origin: CLIENT_URL,
-    methods: ["GET", "POST"],
-    credentials: true
+    methods: ["GET", "POST"]
   }
 });
 
@@ -35,12 +32,45 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(__dirname));
 
-// Simple OTP Generator (since otp-generator package might be causing issues)
+// Simple OTP Generator
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// Database Models (simplified)
+// Simple UUID generator (replacement for uuid package)
+const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+// Input validation helper
+const validateInput = (fields) => {
+  const errors = [];
+  
+  if (fields.email && !isValidEmail(fields.email)) {
+    errors.push({ field: 'email', message: 'Invalid email format' });
+  }
+  
+  if (fields.password && fields.password.length < 6) {
+    errors.push({ field: 'password', message: 'Password must be at least 6 characters' });
+  }
+  
+  if (fields.name && !fields.name.trim()) {
+    errors.push({ field: 'name', message: 'Name is required' });
+  }
+  
+  return errors;
+};
+
+const isValidEmail = (email) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
+
+// Database Models
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, lowercase: true },
   name: { type: String, required: true },
@@ -138,7 +168,7 @@ const authenticateToken = async (req, res, next) => {
       return res.status(401).json({ error: 'Access token required' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key');
+    const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.userId);
     
     if (!user || user.status !== 'active') {
@@ -160,7 +190,7 @@ io.on('connection', (socket) => {
 
   socket.on('authenticate', async (token) => {
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key');
+      const decoded = jwt.verify(token, JWT_SECRET);
       const user = await User.findById(decoded.userId);
       
       if (user) {
@@ -227,6 +257,13 @@ const createSampleCardTransactions = async (cardId, userId) => {
       status: 'completed',
       description: 'Cloud services',
       transaction_date: new Date('2025-09-15')
+    },
+    {
+      merchant_name: 'SPOTIFY',
+      amount_cents: -1299,
+      status: 'completed',
+      description: 'Music subscription',
+      transaction_date: new Date('2025-09-10')
     }
   ];
 
@@ -246,18 +283,15 @@ app.get('/', (req, res) => {
 });
 
 // Auth Routes
-app.post('/api/auth/signup', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').isLength({ min: 6 }),
-  body('name').notEmpty().trim()
-], async (req, res) => {
+app.post('/api/auth/signup', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
     const { email, password, name, phone } = req.body;
+
+    // Input validation
+    const errors = validateInput({ email, password, name });
+    if (errors.length > 0) {
+      return res.status(400).json({ errors });
+    }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -297,17 +331,15 @@ app.post('/api/auth/signup', [
   }
 });
 
-app.post('/api/auth/login', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').notEmpty()
-], async (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
     const { email, password } = req.body;
+
+    // Input validation
+    const errors = validateInput({ email, password });
+    if (errors.length > 0) {
+      return res.status(400).json({ errors });
+    }
 
     const user = await User.findOne({ email });
     if (!user) {
@@ -335,14 +367,15 @@ app.post('/api/auth/login', [
     });
     await otpRecord.save();
 
-    // In a real app, you would send this via email
+    // In production, send OTP via email
+    // For demo, we'll return it in response
     console.log(`OTP for ${user.email}: ${otp}`);
 
     res.json({
       message: 'OTP generated successfully',
       user_id: user._id,
       email: user.email,
-      otp: otp // Remove this in production - only for demo
+      otp: otp // Remove this in production
     });
 
   } catch (error) {
@@ -351,17 +384,13 @@ app.post('/api/auth/login', [
   }
 });
 
-app.post('/api/auth/verify-otp', [
-  body('user_id').notEmpty(),
-  body('otp').isLength({ min: 6, max: 6 })
-], async (req, res) => {
+app.post('/api/auth/verify-otp', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
     const { user_id, otp } = req.body;
+
+    if (!user_id || !otp || otp.length !== 6) {
+      return res.status(400).json({ error: 'User ID and 6-digit OTP are required' });
+    }
 
     const otpRecord = await OTP.findOne({
       user_id,
@@ -385,7 +414,7 @@ app.post('/api/auth/verify-otp', [
 
     const token = jwt.sign(
       { userId: user._id, email: user.email },
-      process.env.JWT_SECRET || 'fallback-secret-key',
+      JWT_SECRET,
       { expiresIn: '30d' }
     );
 
@@ -413,6 +442,45 @@ app.post('/api/auth/verify-otp', [
   }
 });
 
+app.post('/api/auth/resend-otp', async (req, res) => {
+  try {
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    const user = await User.findById(user_id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Generate new OTP
+    const otp = generateOTP();
+
+    // Save OTP to database
+    const otpRecord = new OTP({
+      user_id: user._id,
+      otp,
+      type: 'login',
+      expires_at: new Date(Date.now() + 10 * 60 * 1000)
+    });
+    await otpRecord.save();
+
+    console.log(`New OTP for ${user.email}: ${otp}`);
+
+    res.json({
+      message: 'New OTP generated successfully',
+      user_id: user._id,
+      otp: otp // Remove this in production
+    });
+
+  } catch (error) {
+    console.error('Resend OTP error:', error);
+    res.status(500).json({ error: 'Failed to resend OTP' });
+  }
+});
+
 // Profile Routes
 app.get('/api/profile', authenticateToken, async (req, res) => {
   try {
@@ -429,6 +497,32 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Profile fetch error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/api/profile', authenticateToken, async (req, res) => {
+  try {
+    const { name, phone } = req.body;
+    const updates = {};
+
+    if (name && name.trim()) {
+      updates.name = name.trim();
+    }
+
+    if (phone) {
+      updates.phone = phone;
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      updates,
+      { new: true }
+    ).select('-hashed_password');
+
+    res.json({ message: 'Profile updated successfully', user });
+  } catch (error) {
+    console.error('Profile update error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -454,11 +548,26 @@ app.get('/api/account/balance', authenticateToken, async (req, res) => {
 
 app.get('/api/account/transactions', authenticateToken, async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
     const transactions = await Transaction.find({ user_id: req.user._id })
       .sort({ created_at: -1 })
-      .limit(20);
+      .skip(skip)
+      .limit(limit);
 
-    res.json({ transactions });
+    const total = await Transaction.countDocuments({ user_id: req.user._id });
+
+    res.json({
+      transactions,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
     console.error('Transactions fetch error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -466,16 +575,13 @@ app.get('/api/account/transactions', authenticateToken, async (req, res) => {
 });
 
 // Deposit Route
-app.post('/api/account/deposit', authenticateToken, [
-  body('amount_cents').isInt({ min: 100 })
-], async (req, res) => {
+app.post('/api/account/deposit', authenticateToken, async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
     const { amount_cents, description } = req.body;
+
+    if (!amount_cents || amount_cents < 100) {
+      return res.status(400).json({ error: 'Amount must be at least 100 cents ($1.00)' });
+    }
 
     const account = await Account.findOne({ user_id: req.user._id });
     if (!account) {
@@ -509,17 +615,17 @@ app.post('/api/account/deposit', authenticateToken, [
 });
 
 // Transfer Route
-app.post('/api/account/transfer', authenticateToken, [
-  body('amount_cents').isInt({ min: 1 }),
-  body('recipient_email').isEmail()
-], async (req, res) => {
+app.post('/api/account/transfer', authenticateToken, async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+    const { amount_cents, recipient_email, description } = req.body;
+
+    if (!amount_cents || amount_cents < 1) {
+      return res.status(400).json({ error: 'Valid amount is required' });
     }
 
-    const { amount_cents, recipient_email, description } = req.body;
+    if (!recipient_email || !isValidEmail(recipient_email)) {
+      return res.status(400).json({ error: 'Valid recipient email is required' });
+    }
 
     const senderAccount = await Account.findOne({ user_id: req.user._id });
     if (!senderAccount) {
@@ -557,7 +663,19 @@ app.post('/api/account/transfer', authenticateToken, [
       counterparty_email: recipient_email
     });
 
+    const recipientTransaction = new Transaction({
+      user_id: recipient._id,
+      account_id: recipientAccount._id,
+      type: 'transfer',
+      amount_cents: amount_cents,
+      description: description || `Transfer from ${req.user.email}`,
+      status: 'completed',
+      counterparty_name: req.user.name,
+      counterparty_email: req.user.email
+    });
+
     await senderTransaction.save();
+    await recipientTransaction.save();
 
     await emitBalanceUpdate(req.user._id);
     await emitBalanceUpdate(recipient._id);
@@ -709,6 +827,7 @@ mongoose.connect(MONGODB_URI)
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`HCB Clone Server running on port ${PORT}`);
     console.log(`Frontend: ${CLIENT_URL}`);
+    console.log('All features available: OTP Auth, Transfers, Virtual Cards, Real-time Updates');
   });
 })
 .catch(err => {
