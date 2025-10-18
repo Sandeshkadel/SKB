@@ -13,6 +13,7 @@ const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const nodemailer = require('nodemailer');
 const { v4: uuidv4 } = require('uuid');
+const otpGenerator = require('otp-generator');
 const { body, validationResult } = require('express-validator');
 const path = require('path');
 
@@ -83,7 +84,7 @@ const UserSchema = new mongoose.Schema({
   column_account_id: String,
   verification_token: String,
   email_verified: { type: Boolean, default: false },
-  two_factor_enabled: { type: Boolean, default: false },
+  two_factor_enabled: { type: Boolean, default: true },
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now }
 });
@@ -91,7 +92,7 @@ const UserSchema = new mongoose.Schema({
 const AccountSchema = new mongoose.Schema({
   user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   account_number: { type: String, required: true, unique: true },
-  routing_number: { type: String, default: '021000021' }, // Column's routing
+  routing_number: { type: String, default: '021000021' },
   balance_cents: { type: Number, default: 0 },
   currency: { type: String, default: 'USD' },
   status: { type: String, enum: ['active', 'frozen', 'closed'], default: 'active' },
@@ -124,8 +125,54 @@ const VirtualCardSchema = new mongoose.Schema({
   brand: { type: String, default: 'Visa' },
   type: { type: String, enum: ['virtual', 'physical'], default: 'virtual' },
   status: { type: String, enum: ['active', 'blocked', 'cancelled'], default: 'active' },
-  spending_limit_cents: { type: Number, default: 1000000 }, // $10,000 default
+  billing_address: {
+    street: { type: String, default: '8605 Santa Monica Blvd #86294' },
+    city: { type: String, default: 'West Hollywood' },
+    state: { type: String, default: 'CA' },
+    zip_code: { type: String, default: '90069' },
+    country: { type: String, default: 'US' }
+  },
+  phone_number: { type: String, default: '970-856-6136' },
+  card_network: { type: String, default: 'Visa' },
+  card_type: { type: String, default: 'Virtual' },
+  spending_limit_cents: { type: Number, default: 1000000 },
+  current_spend_cents: { type: Number, default: 0 },
   column_card_id: String,
+  created_at: { type: Date, default: Date.now }
+});
+
+const CardTransactionSchema = new mongoose.Schema({
+  card_id: { type: mongoose.Schema.Types.ObjectId, ref: 'VirtualCard', required: true },
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  amount_cents: { type: Number, required: true },
+  currency: { type: String, default: 'USD' },
+  merchant_name: { type: String, required: true },
+  merchant_category: String,
+  status: { 
+    type: String, 
+    enum: ['pending', 'completed', 'declined', 'cancelled'], 
+    default: 'pending' 
+  },
+  description: String,
+  location: {
+    city: String,
+    state: String,
+    country: String
+  },
+  receipt_image: String,
+  receipt_notes: String,
+  column_transaction_id: String,
+  metadata: mongoose.Schema.Types.Mixed,
+  transaction_date: { type: Date, default: Date.now },
+  created_at: { type: Date, default: Date.now }
+});
+
+const OTPSchema = new mongoose.Schema({
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  otp: { type: String, required: true },
+  type: { type: String, enum: ['login', 'verification', 'reset'], required: true },
+  expires_at: { type: Date, required: true },
+  used: { type: Boolean, default: false },
   created_at: { type: Date, default: Date.now }
 });
 
@@ -142,6 +189,8 @@ const User = mongoose.model('User', UserSchema);
 const Account = mongoose.model('Account', AccountSchema);
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 const VirtualCard = mongoose.model('VirtualCard', VirtualCardSchema);
+const CardTransaction = mongoose.model('CardTransaction', CardTransactionSchema);
+const OTP = mongoose.model('OTP', OTPSchema);
 const VerificationToken = mongoose.model('VerificationToken', VerificationTokenSchema);
 
 // Column API Configuration
@@ -233,6 +282,29 @@ const generateAccountNumber = () => {
   return 'HCB' + Date.now() + Math.floor(Math.random() * 1000);
 };
 
+const sendOTPEmail = async (user, otp) => {
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: user.email,
+    subject: 'Your HCB Clone Login OTP',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #7C3AED;">HCB Clone Security Code</h2>
+        <p>Hello ${user.name},</p>
+        <p>Your One-Time Password (OTP) for login is:</p>
+        <div style="background-color: #f3f4f6; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 20px 0;">
+          ${otp}
+        </div>
+        <p>This OTP will expire in 10 minutes.</p>
+        <p>If you didn't request this, please ignore this email.</p>
+        <p>Stay secure,<br>The HCB Clone Team</p>
+      </div>
+    `
+  };
+
+  await transporter.sendMail(mailOptions);
+};
+
 const sendVerificationEmail = async (user, token) => {
   const verificationUrl = `${process.env.CLIENT_URL}/verify-email?token=${token}`;
   
@@ -257,6 +329,76 @@ const sendVerificationEmail = async (user, token) => {
   };
 
   await transporter.sendMail(mailOptions);
+};
+
+const createSampleCardTransactions = async (cardId, userId) => {
+  const sampleTransactions = [
+    {
+      merchant_name: 'SINCH MAILGUN',
+      amount_cents: -2702,
+      status: 'declined',
+      description: 'Email service subscription',
+      location: { city: 'San Francisco', state: 'CA', country: 'US' },
+      transaction_date: new Date('2025-10-08')
+    },
+    {
+      merchant_name: 'FOODMANDU PVT. LTD.',
+      amount_cents: -702,
+      status: 'declined',
+      description: 'Food delivery',
+      location: { city: 'Kathmandu', state: '', country: 'NP' },
+      transaction_date: new Date('2025-08-27')
+    },
+    {
+      merchant_name: 'FOODMANDU PVT. LTD.',
+      amount_cents: -853,
+      status: 'declined',
+      description: 'Food delivery',
+      location: { city: 'Kathmandu', state: '', country: 'NP' },
+      transaction_date: new Date('2025-08-27')
+    },
+    {
+      merchant_name: 'FOODMANDU PVT. LTD.',
+      amount_cents: -794,
+      status: 'completed',
+      description: 'Food delivery',
+      location: { city: 'Kathmandu', state: '', country: 'NP' },
+      transaction_date: new Date('2025-08-28')
+    },
+    {
+      merchant_name: 'DARAZ KAYMU PVT LTD',
+      amount_cents: -946,
+      status: 'declined',
+      description: 'Online shopping',
+      location: { city: 'Kathmandu', state: '', country: 'NP' },
+      transaction_date: new Date('2025-08-27')
+    },
+    {
+      merchant_name: 'AMAZON WEB SERVICES',
+      amount_cents: -2945,
+      status: 'completed',
+      description: 'Cloud services',
+      location: { city: 'Seattle', state: 'WA', country: 'US' },
+      transaction_date: new Date('2025-09-15')
+    },
+    {
+      merchant_name: 'SPOTIFY',
+      amount_cents: -1299,
+      status: 'completed',
+      description: 'Music subscription',
+      location: { city: 'New York', state: 'NY', country: 'US' },
+      transaction_date: new Date('2025-09-10')
+    }
+  ];
+
+  for (const transaction of sampleTransactions) {
+    const cardTransaction = new CardTransaction({
+      card_id: cardId,
+      user_id: userId,
+      ...transaction
+    });
+    await cardTransaction.save();
+  }
 };
 
 // Routes
@@ -332,16 +474,8 @@ app.post('/api/auth/signup', [
     // Send verification email
     await sendVerificationEmail(user, verificationToken.token);
 
-    // Generate JWT
-    const token = jwt.sign(
-      { userId: user._id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
-    );
-
     res.status(201).json({
       message: 'Account created successfully. Please check your email for verification.',
-      token,
       user: {
         id: user._id,
         email: user.email,
@@ -384,15 +518,85 @@ app.post('/api/auth/login', [
       return res.status(401).json({ error: 'Account is not active' });
     }
 
+    // Generate OTP
+    const otp = otpGenerator.generate(6, {
+      digits: true,
+      alphabets: false,
+      upperCase: false,
+      specialChars: false
+    });
+
+    // Save OTP to database
+    const otpRecord = new OTP({
+      user_id: user._id,
+      otp,
+      type: 'login',
+      expires_at: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+    });
+    await otpRecord.save();
+
+    // Send OTP via email
+    await sendOTPEmail(user, otp);
+
+    res.json({
+      message: 'OTP sent to your email',
+      user_id: user._id,
+      email: user.email
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/auth/verify-otp', [
+  body('user_id').notEmpty(),
+  body('otp').isLength({ min: 6, max: 6 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { user_id, otp } = req.body;
+
+    // Find valid OTP
+    const otpRecord = await OTP.findOne({
+      user_id,
+      otp,
+      type: 'login',
+      used: false,
+      expires_at: { $gt: new Date() }
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({ error: 'Invalid or expired OTP' });
+    }
+
+    // Mark OTP as used
+    otpRecord.used = true;
+    await otpRecord.save();
+
+    // Get user
+    const user = await User.findById(user_id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Generate JWT token
     const token = jwt.sign(
       { userId: user._id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
 
+    // Get account info
     const account = await Account.findOne({ user_id: user._id });
 
     res.json({
+      message: 'Login successful',
       token,
       user: {
         id: user._id,
@@ -411,8 +615,55 @@ app.post('/api/auth/login', [
     });
 
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('OTP verification error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/auth/resend-otp', [
+  body('user_id').notEmpty()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { user_id } = req.body;
+
+    const user = await User.findById(user_id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Generate new OTP
+    const otp = otpGenerator.generate(6, {
+      digits: true,
+      alphabets: false,
+      upperCase: false,
+      specialChars: false
+    });
+
+    // Save OTP to database
+    const otpRecord = new OTP({
+      user_id: user._id,
+      otp,
+      type: 'login',
+      expires_at: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+    });
+    await otpRecord.save();
+
+    // Send OTP via email
+    await sendOTPEmail(user, otp);
+
+    res.json({
+      message: 'New OTP sent to your email',
+      user_id: user._id
+    });
+
+  } catch (error) {
+    console.error('Resend OTP error:', error);
+    res.status(500).json({ error: 'Failed to resend OTP' });
   }
 });
 
@@ -582,7 +833,7 @@ app.get('/api/account/transactions', authenticateToken, async (req, res) => {
 
 // Deposit Route
 app.post('/api/account/deposit', authenticateToken, [
-  body('amount_cents').isInt({ min: 100 }), // Minimum $1
+  body('amount_cents').isInt({ min: 100 }),
   body('currency').isLength({ min: 3, max: 3 })
 ], async (req, res) => {
   try {
@@ -605,8 +856,6 @@ app.post('/api/account/deposit', authenticateToken, [
         amount: amount_cents,
         currency: currency.toLowerCase(),
         description: description || 'Account deposit',
-        // In real scenario, you'd have payment method details here
-        // For sandbox, we'll simulate success
         status: 'completed'
       });
       columnPaymentId = paymentResponse.data.id;
@@ -691,7 +940,7 @@ app.post('/api/account/transfer', authenticateToken, [
       user_id: req.user._id,
       account_id: senderAccount._id,
       type: 'transfer',
-      amount_cents: -amount_cents, // Negative for sender
+      amount_cents: -amount_cents,
       currency: 'USD',
       description: description || `Transfer to ${recipient_email}`,
       status: 'completed',
@@ -703,7 +952,7 @@ app.post('/api/account/transfer', authenticateToken, [
       user_id: recipient._id,
       account_id: recipientAccount._id,
       type: 'transfer',
-      amount_cents: amount_cents, // Positive for recipient
+      amount_cents: amount_cents,
       currency: 'USD',
       description: description || `Transfer from ${req.user.email}`,
       status: 'completed',
@@ -729,10 +978,99 @@ app.post('/api/account/transfer', authenticateToken, [
   }
 });
 
+// External Transfer Route
+app.post('/api/transfers/external', authenticateToken, [
+  body('amount_cents').isInt({ min: 100 }),
+  body('recipient_name').notEmpty(),
+  body('recipient_account_number').notEmpty(),
+  body('routing_number').notEmpty(),
+  body('description').optional()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { amount_cents, recipient_name, recipient_account_number, routing_number, description } = req.body;
+
+    const account = await Account.findOne({ user_id: req.user._id });
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    if (account.balance_cents < amount_cents) {
+      return res.status(400).json({ error: 'Insufficient funds' });
+    }
+
+    // Process external transfer via Column API
+    let columnTransactionId;
+    try {
+      const transferResponse = await columnAPI.post('/payments', {
+        amount: amount_cents,
+        currency: 'usd',
+        description: description || `Transfer to ${recipient_name}`,
+        to: {
+          type: 'account',
+          account_number: recipient_account_number,
+          routing_number: routing_number
+        },
+        metadata: {
+          recipient_name,
+          user_id: req.user._id.toString()
+        }
+      });
+      columnTransactionId = transferResponse.data.id;
+    } catch (error) {
+      console.error('Column transfer failed:', error.response?.data);
+      return res.status(500).json({ error: 'External transfer failed' });
+    }
+
+    // Update account balance
+    account.balance_cents -= amount_cents;
+    await account.save();
+
+    // Create transaction record
+    const transaction = new Transaction({
+      user_id: req.user._id,
+      account_id: account._id,
+      type: 'transfer',
+      amount_cents: -amount_cents,
+      currency: 'USD',
+      description: description || `External transfer to ${recipient_name}`,
+      status: 'completed',
+      counterparty_name: recipient_name,
+      column_transaction_id: columnTransactionId,
+      metadata: {
+        recipient_account_number: recipient_account_number.slice(-4),
+        routing_number: routing_number.slice(-4),
+        transfer_type: 'external'
+      }
+    });
+    await transaction.save();
+
+    await emitBalanceUpdate(req.user._id);
+
+    res.json({
+      message: 'External transfer initiated successfully',
+      transaction_id: transaction._id,
+      column_transaction_id: columnTransactionId,
+      new_balance: account.balance_cents
+    });
+  } catch (error) {
+    console.error('External transfer error:', error);
+    res.status(500).json({ error: 'Transfer failed' });
+  }
+});
+
 // Card Routes
-app.post('/api/cards', authenticateToken, async (req, res) => {
+app.post('/api/cards', authenticateToken, [
+  body('billing_address').optional(),
+  body('phone_number').optional()
+], async (req, res) => {
   try {
     const user = req.user;
+    const { billing_address, phone_number } = req.body;
     const account = await Account.findOne({ user_id: user._id });
 
     if (!account) {
@@ -761,7 +1099,6 @@ app.post('/api/cards', authenticateToken, async (req, res) => {
       columnCardId = cardResponse.data.id;
     } catch (error) {
       console.error('Column card creation failed:', error.response?.data);
-      // For demo, we'll create a simulated card
     }
 
     // Create virtual card in database
@@ -774,10 +1111,21 @@ app.post('/api/cards', authenticateToken, async (req, res) => {
       cvv: Array.from({ length: 3 }, () => Math.floor(Math.random() * 10)).join(''),
       brand: 'Visa',
       type: 'virtual',
-      column_card_id: columnCardId
+      column_card_id: columnCardId,
+      billing_address: billing_address || {
+        street: '8605 Santa Monica Blvd #86294',
+        city: 'West Hollywood',
+        state: 'CA',
+        zip_code: '90069',
+        country: 'US'
+      },
+      phone_number: phone_number || '970-856-6136'
     });
 
     await virtualCard.save();
+
+    // Create sample transactions for the new card
+    await createSampleCardTransactions(virtualCard._id, user._id);
 
     res.status(201).json({
       message: 'Virtual card created successfully',
@@ -790,6 +1138,10 @@ app.post('/api/cards', authenticateToken, async (req, res) => {
         cvv: virtualCard.cvv,
         brand: virtualCard.brand,
         status: virtualCard.status,
+        billing_address: virtualCard.billing_address,
+        phone_number: virtualCard.phone_number,
+        card_network: virtualCard.card_network,
+        card_type: virtualCard.card_type,
         created_at: virtualCard.created_at
       }
     });
@@ -808,6 +1160,32 @@ app.get('/api/cards', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get cards error:', error);
     res.status(500).json({ error: 'Failed to fetch cards' });
+  }
+});
+
+app.get('/api/cards/:cardId', authenticateToken, async (req, res) => {
+  try {
+    const card = await VirtualCard.findOne({
+      _id: req.params.cardId,
+      user_id: req.user._id
+    });
+
+    if (!card) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    // Get card transactions
+    const transactions = await CardTransaction.find({
+      card_id: card._id
+    }).sort({ transaction_date: -1 });
+
+    res.json({
+      card,
+      transactions
+    });
+  } catch (error) {
+    console.error('Get card details error:', error);
+    res.status(500).json({ error: 'Failed to fetch card details' });
   }
 });
 
@@ -841,6 +1219,49 @@ app.post('/api/cards/:id/block', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Block card error:', error);
     res.status(500).json({ error: 'Failed to update card status' });
+  }
+});
+
+// Receipt Management
+app.post('/api/transactions/:transactionId/receipt', authenticateToken, upload.single('receipt_image'), async (req, res) => {
+  try {
+    const { notes } = req.body;
+    const transaction = await CardTransaction.findOne({
+      _id: req.params.transactionId,
+      user_id: req.user._id
+    });
+
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    let receiptImageUrl = null;
+    if (req.file) {
+      // Upload to Cloudinary
+      const result = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: 'hcb-clone/receipts' },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+        stream.end(req.file.buffer);
+      });
+      receiptImageUrl = result.secure_url;
+    }
+
+    transaction.receipt_image = receiptImageUrl;
+    transaction.receipt_notes = notes;
+    await transaction.save();
+
+    res.json({
+      message: 'Receipt added successfully',
+      transaction
+    });
+  } catch (error) {
+    console.error('Add receipt error:', error);
+    res.status(500).json({ error: 'Failed to add receipt' });
   }
 });
 
