@@ -85,6 +85,21 @@
             outline: none;
             box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
         }
+
+        .password-container {
+            position: relative;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #6b7280;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -206,7 +221,25 @@
             },
 
             formatCardDate(month, year) {
-                return `${month.toString().padStart(2, '0')}/${year}`;
+                return `${month.toString().padStart(2, '0')}/${year.toString().slice(-2)}`;
+            },
+
+            setupPasswordToggle(inputId) {
+                const passwordInput = document.getElementById(inputId);
+                const toggleButton = document.createElement('button');
+                toggleButton.type = 'button';
+                toggleButton.className = 'password-toggle';
+                toggleButton.innerHTML = '<i class="fas fa-eye"></i>';
+                
+                const container = passwordInput.parentElement;
+                container.classList.add('password-container');
+                container.appendChild(toggleButton);
+                
+                toggleButton.addEventListener('click', function() {
+                    const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                    passwordInput.setAttribute('type', type);
+                    this.innerHTML = type === 'password' ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+                });
             }
         };
 
@@ -250,6 +283,10 @@
 
             async put(endpoint, body) {
                 return this.request(endpoint, { method: 'PUT', body });
+            },
+
+            async delete(endpoint) {
+                return this.request(endpoint, { method: 'DELETE' });
             }
         };
 
@@ -313,6 +350,9 @@
 
                 elements.mainContent.innerHTML = authHTML;
                 this.setupAuthHandlers();
+                
+                // Setup password toggle
+                Utils.setupPasswordToggle('password');
             },
 
             setupAuthHandlers() {
@@ -624,6 +664,7 @@
                                                 ${Utils.formatCurrency(AppState.currentBalance)}
                                             </h2>
                                             <p class="text-purple-200 text-sm mt-2">Account: ${AppState.account?.account_number || 'N/A'}</p>
+                                            ${AppState.account?.routing_number ? `<p class="text-purple-200 text-sm">Routing: ${AppState.account.routing_number}</p>` : ''}
                                         </div>
                                         <div class="bg-white bg-opacity-20 rounded-full p-3">
                                             <i class="fas fa-wallet text-2xl"></i>
@@ -774,6 +815,11 @@
                                         class="text-white hover:text-gray-200 transition-colors duration-200 text-sm">
                                     <i class="fas fa-eye mr-1"></i>
                                     Details
+                                </button>
+                                <button onclick="CardManager.deleteCard('${card._id}')" 
+                                        class="text-white hover:text-red-200 transition-colors duration-200 text-sm">
+                                    <i class="fas fa-trash mr-1"></i>
+                                    Delete
                                 </button>
                             </div>
                         </div>
@@ -1071,14 +1117,6 @@
 
                     elements.mainContent.innerHTML = profileHTML;
 
-                    // Setup profile picture upload
-                    document.getElementById('profilePictureUpload').addEventListener('change', async (e) => {
-                        const file = e.target.files[0];
-                        if (file) {
-                            await ProfileManager.uploadProfilePicture(file);
-                        }
-                    });
-
                     // Setup profile form
                     document.getElementById('profileForm').addEventListener('submit', async (e) => {
                         e.preventDefault();
@@ -1095,39 +1133,6 @@
 
         // Profile Management
         const ProfileManager = {
-            async uploadProfilePicture(file) {
-                Utils.showLoading();
-                try {
-                    const formData = new FormData();
-                    formData.append('profile_picture', file);
-
-                    const response = await fetch('/api/profile/picture', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${AppState.token}`
-                        },
-                        body: formData
-                    });
-
-                    const data = await response.json();
-                    
-                    if (!response.ok) {
-                        throw new Error(data.error);
-                    }
-
-                    AppState.user = data.user;
-                    Utils.showToast('Profile picture updated successfully!', 'success');
-                    
-                    // Refresh the profile view
-                    DashboardManager.showProfile();
-                    
-                } catch (error) {
-                    Utils.showToast(error.message, 'error');
-                } finally {
-                    Utils.hideLoading();
-                }
-            },
-
             async updateProfile(formData) {
                 Utils.showLoading();
                 try {
@@ -1274,7 +1279,7 @@
                                         </div>
                                         <div>
                                             <span class="text-gray-600">Card number</span>
-                                            <div class="font-mono font-semibold">•••• •••• •••• ${card.last4}</div>
+                                            <div class="font-mono font-semibold">${card.card_number}</div>
                                         </div>
                                         <div>
                                             <span class="text-gray-600">Expiration date</span>
@@ -1282,7 +1287,7 @@
                                         </div>
                                         <div>
                                             <span class="text-gray-600">CVC</span>
-                                            <div class="font-mono font-semibold">•••</div>
+                                            <div class="font-mono font-semibold">${card.cvv}</div>
                                         </div>
                                         <div class="col-span-2">
                                             <span class="text-gray-600">Address</span>
@@ -1314,10 +1319,14 @@
                                         </div>
                                     </div>
 
-                                    <div class="pt-4">
+                                    <div class="grid grid-cols-2 gap-3 pt-4">
                                         <button onclick="CardManager.toggleCardBlock('${card._id}')" 
-                                                class="w-full bg-${card.status === 'active' ? 'red' : 'green'}-600 text-white py-2 px-4 rounded-lg hover:bg-${card.status === 'active' ? 'red' : 'green'}-700 transition-colors duration-200">
+                                                class="bg-${card.status === 'active' ? 'red' : 'green'}-600 text-white py-2 px-4 rounded-lg hover:bg-${card.status === 'active' ? 'red' : 'green'}-700 transition-colors duration-200">
                                             ${card.status === 'active' ? 'Block Card' : 'Unblock Card'}
+                                        </button>
+                                        <button onclick="CardManager.deleteCard('${card._id}')" 
+                                                class="bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition-colors duration-200">
+                                            Delete Card
                                         </button>
                                     </div>
                                 </div>
@@ -1343,37 +1352,20 @@
                                                     <div class="flex-1 min-w-0">
                                                         <div class="flex items-center space-x-2">
                                                             <p class="text-sm font-medium text-gray-900 truncate">
-                                                                ${transaction.merchant_name}
+                                                                ${transaction.description}
                                                             </p>
                                                             <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${this.getStatusColor(transaction.status)}">
                                                                 ${this.getStatusText(transaction.status)}
                                                             </span>
                                                         </div>
                                                         <p class="text-sm text-gray-500 mt-1">
-                                                            ${Utils.formatDate(transaction.transaction_date)}
-                                                            ${transaction.location?.city ? ` • ${transaction.location.city}` : ''}
+                                                            ${Utils.formatDate(transaction.created_at)}
                                                         </p>
-                                                        ${transaction.description ? `
-                                                            <p class="text-xs text-gray-400 mt-1">${transaction.description}</p>
-                                                        ` : ''}
                                                     </div>
                                                 </div>
                                                 <div class="text-right">
                                                     <div class="text-sm font-semibold ${transaction.amount_cents < 0 ? 'text-red-600' : 'text-green-600'}">
                                                         ${transaction.amount_cents < 0 ? '-' : '+'}${Utils.formatCurrency(Math.abs(transaction.amount_cents))}
-                                                    </div>
-                                                    <div class="mt-2">
-                                                        ${transaction.receipt_image ? `
-                                                            <button onclick="CardManager.viewReceipt('${transaction._id}')" 
-                                                                    class="text-xs text-purple-600 hover:text-purple-500">
-                                                                <i class="fas fa-receipt mr-1"></i>View Receipt
-                                                            </button>
-                                                        ` : `
-                                                            <button onclick="CardManager.addReceipt('${transaction._id}')" 
-                                                                    class="text-xs text-gray-500 hover:text-gray-700">
-                                                                <i class="fas fa-plus mr-1"></i>Add Receipt
-                                                            </button>
-                                                        `}
                                                     </div>
                                                 </div>
                                             </div>
@@ -1423,7 +1415,7 @@
                                     <i class="fas fa-exclamation-triangle text-yellow-600 mt-1"></i>
                                     <div class="text-sm text-yellow-800">
                                         <p class="font-medium">Save Your Card Details</p>
-                                        <p class="mt-1">For security reasons, we won't show your full card number again. Please save these details in a secure place.</p>
+                                        <p class="mt-1">For security reasons, we won't show your full card number again in the card list. Please save these details in a secure place.</p>
                                     </div>
                                 </div>
                             </div>
@@ -1447,10 +1439,16 @@
                                 </div>
                             </div>
 
-                            <button onclick="this.closest('.fixed').remove()" 
-                                    class="w-full bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
-                                I've Saved My Card Details
-                            </button>
+                            <div class="flex space-x-3">
+                                <button onclick="CardManager.showCardDetails('${card._id}')" 
+                                        class="flex-1 bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
+                                    View Details
+                                </button>
+                                <button onclick="this.closest('.fixed').remove()" 
+                                        class="flex-1 bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-colors duration-200 font-medium">
+                                    Close
+                                </button>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -1495,88 +1493,28 @@
                 }
             },
 
-            async addReceipt(transactionId) {
-                const modal = document.createElement('div');
-                modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in';
-                modal.innerHTML = `
-                    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
-                        <div class="px-6 py-4 border-b border-gray-200">
-                            <h3 class="text-xl font-semibold text-gray-900">Add Receipt</h3>
-                        </div>
-                        <form id="receiptForm" class="p-6 space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Receipt Image (Optional)</label>
-                                <input type="file" id="receiptImage" accept="image/*" 
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Notes (Optional)</label>
-                                <textarea name="notes" rows="3" 
-                                          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                          placeholder="Add any notes about this transaction..."></textarea>
-                            </div>
-                            <div class="flex space-x-3 pt-4">
-                                <button type="button" onclick="this.closest('.fixed').remove()" 
-                                        class="flex-1 bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-colors duration-200 font-medium">
-                                    Cancel
-                                </button>
-                                <button type="submit" 
-                                        class="flex-1 bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
-                                    Save Receipt
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                `;
+            async deleteCard(cardId) {
+                if (!confirm('Are you sure you want to delete this card? This action cannot be undone.')) {
+                    return;
+                }
 
-                document.body.appendChild(modal);
-
-                modal.querySelector('#receiptForm').addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    Utils.showLoading();
-
-                    const formData = new FormData();
-                    const receiptImage = modal.querySelector('#receiptImage').files[0];
-                    const notes = modal.querySelector('textarea[name="notes"]').value;
-
-                    if (receiptImage) {
-                        formData.append('receipt_image', receiptImage);
-                    }
-                    formData.append('notes', notes);
-
-                    try {
-                        const response = await fetch(`/api/transactions/${transactionId}/receipt`, {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': `Bearer ${AppState.token}`
-                            },
-                            body: formData
-                        });
-
-                        const data = await response.json();
-                        
-                        if (!response.ok) {
-                            throw new Error(data.error);
-                        }
-
-                        Utils.showToast('Receipt added successfully!', 'success');
-                        modal.remove();
-                        // Refresh the card details view
-                        const cardElement = document.querySelector('.virtual-card');
-                        if (cardElement) {
-                            const cardId = cardElement.closest('.fixed').querySelector('button[onclick*="toggleCardBlock"]').onclick.toString().match(/'([^']+)'/)[1];
-                            this.showCardDetails(cardId);
-                        }
-                    } catch (error) {
-                        Utils.showToast(error.message, 'error');
-                    } finally {
-                        Utils.hideLoading();
-                    }
-                });
-            },
-
-            viewReceipt(transactionId) {
-                Utils.showToast('Receipt view functionality would open the receipt image', 'info');
+                Utils.showLoading();
+                try {
+                    await ApiService.delete(`/api/cards/${cardId}`);
+                    
+                    Utils.showToast('Card deleted successfully', 'success');
+                    
+                    // Close any open modals
+                    document.querySelectorAll('.fixed.inset-0').forEach(modal => modal.remove());
+                    
+                    await DashboardManager.loadDashboardData();
+                    DashboardManager.renderDashboard();
+                    
+                } catch (error) {
+                    Utils.showToast(error.message, 'error');
+                } finally {
+                    Utils.hideLoading();
+                }
             }
         };
 
@@ -1588,7 +1526,7 @@
                 modal.innerHTML = `
                     <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
                         <div class="px-6 py-4 border-b border-gray-200">
-                            <h3 class="text-xl font-semibold text-gray-900">External Transfer</h3>
+                            <h3 class="text-xl font-semibold text-gray-900">External Bank Transfer</h3>
                         </div>
                         <form id="externalTransferForm" class="p-6 space-y-4">
                             <div>
@@ -1653,7 +1591,7 @@
                             description: formData.get('description')
                         });
 
-                        Utils.showToast('External transfer initiated successfully!', 'success');
+                        Utils.showToast('External transfer completed successfully!', 'success');
                         modal.remove();
                         DashboardManager.loadDashboardData().then(() => DashboardManager.renderDashboard());
                     } catch (error) {
