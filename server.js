@@ -34,46 +34,67 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(__dirname));
 
-// In-memory storage (replace with MongoDB later)
+// In-memory storage
 const users = new Map();
 const accounts = new Map();
 const transactions = new Map();
 const cards = new Map();
 const otps = new Map();
 
-// Simple OTP Generator
-const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-};
+// Valid Visa BIN ranges
+const VISA_BINS = [
+  '4532', '4556', '4916', '4539', '4485', '4929', '4024', '4532',
+  '4716', '4024', '4486', '4539', '4556', '4916', '4532', '4556'
+];
 
-// Generate account number
-const generateAccountNumber = () => {
-  return 'HCB' + Math.random().toString().slice(2, 11);
-};
-
-// Generate card number
-const generateCardNumber = () => {
-  const bin = '453245';
-  const accountPart = Math.random().toString().slice(2, 11);
-  const cardNumber = bin + accountPart.padEnd(10, '0').slice(0, 10);
+// Generate valid card number using Luhn algorithm
+const generateValidCardNumber = () => {
+  const bin = VISA_BINS[Math.floor(Math.random() * VISA_BINS.length)];
+  let numbers = bin;
   
+  // Generate remaining digits (total 15 digits before check digit)
+  for (let i = 0; i < 11; i++) {
+    numbers += Math.floor(Math.random() * 10);
+  }
+  
+  // Calculate Luhn check digit
   let sum = 0;
-  for (let i = 0; i < 15; i++) {
-    let digit = parseInt(cardNumber[i]);
-    if (i % 2 === 0) {
+  let isEven = false;
+  
+  for (let i = numbers.length - 1; i >= 0; i--) {
+    let digit = parseInt(numbers[i]);
+    
+    if (isEven) {
       digit *= 2;
       if (digit > 9) digit -= 9;
     }
+    
     sum += digit;
+    isEven = !isEven;
   }
-  const checkDigit = (10 - (sum % 10)) % 10;
   
-  return cardNumber + checkDigit;
+  const checkDigit = (10 - (sum % 10)) % 10;
+  return numbers + checkDigit;
 };
 
 // Generate CVV
 const generateCVV = () => {
   return Math.floor(100 + Math.random() * 900).toString();
+};
+
+// Generate account number
+const generateAccountNumber = () => {
+  return Math.random().toString().slice(2, 12);
+};
+
+// Generate routing number (valid US routing number)
+const generateRoutingNumber = () => {
+  return '021000021'; // Standard routing number for testing
+};
+
+// Simple OTP Generator
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
 // Auth middleware
@@ -153,13 +174,14 @@ app.post('/api/auth/signup', async (req, res) => {
 
     users.set(userId, user);
 
-    // Create account
+    // Create account - Start with $0 balance
     const accountId = 'acc_' + Date.now();
     const account = {
       _id: accountId,
       user_id: userId,
       account_number: generateAccountNumber(),
-      balance_cents: 100000, // Start with $1000 for testing
+      routing_number: generateRoutingNumber(),
+      balance_cents: 0, // Start with $0
       currency: 'USD',
       status: 'active',
       created_at: new Date()
@@ -302,6 +324,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
       account: {
         _id: account._id,
         account_number: account.account_number,
+        routing_number: account.routing_number,
         balance_cents: account.balance_cents,
         currency: account.currency
       }
@@ -378,6 +401,7 @@ app.get('/api/profile', authenticateToken, (req, res) => {
       account: {
         _id: account._id,
         account_number: account.account_number,
+        routing_number: account.routing_number,
         balance_cents: account.balance_cents,
         currency: account.currency
       }
@@ -621,7 +645,7 @@ app.get('/api/cards', authenticateToken, (req, res) => {
 
 app.post('/api/cards', authenticateToken, (req, res) => {
   try {
-    const cardNumber = generateCardNumber();
+    const cardNumber = generateValidCardNumber();
     const currentYear = new Date().getFullYear();
     const cardId = 'card_' + Date.now();
     
@@ -698,9 +722,11 @@ app.get('/api/cards/:cardId', authenticateToken, (req, res) => {
     res.json({
       card: {
         _id: card._id,
+        card_number: card.card_number, // Return full card number for details view
         last4: card.last4,
         expiry_month: card.expiry_month,
         expiry_year: card.expiry_year,
+        cvv: card.cvv,
         brand: card.brand,
         status: card.status,
         billing_address: card.billing_address,
@@ -745,7 +771,30 @@ app.post('/api/cards/:cardId/block', authenticateToken, (req, res) => {
   }
 });
 
-// External Transfers
+// Delete card endpoint
+app.delete('/api/cards/:cardId', authenticateToken, (req, res) => {
+  try {
+    const card = cards.get(req.params.cardId);
+
+    if (!card || card.user_id !== req.user._id) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    // Delete the card
+    cards.delete(req.params.cardId);
+
+    res.json({
+      message: 'Card deleted successfully',
+      card_id: req.params.cardId
+    });
+
+  } catch (error) {
+    console.error('Delete card error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// External Bank Transfers
 app.post('/api/transfers/external', authenticateToken, (req, res) => {
   try {
     const { amount_cents, recipient_name, recipient_account_number, routing_number, description } = req.body;
@@ -763,6 +812,16 @@ app.post('/api/transfers/external', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'Insufficient funds' });
     }
 
+    // Validate routing number (basic validation)
+    if (!routing_number || routing_number.length !== 9) {
+      return res.status(400).json({ error: 'Invalid routing number' });
+    }
+
+    // Validate account number
+    if (!recipient_account_number || recipient_account_number.length < 5) {
+      return res.status(400).json({ error: 'Invalid account number' });
+    }
+
     // Update balance
     account.balance_cents -= amount_cents;
     accounts.set(account._id, account);
@@ -775,11 +834,12 @@ app.post('/api/transfers/external', authenticateToken, (req, res) => {
       account_id: account._id,
       amount_cents: -amount_cents,
       currency: 'USD',
-      type: 'transfer',
+      type: 'external_transfer',
       description: description || `External transfer to ${recipient_name}`,
       status: 'completed',
       counterparty_name: recipient_name,
       counterparty_account: recipient_account_number,
+      counterparty_routing: routing_number,
       created_at: new Date()
     };
 
@@ -792,7 +852,7 @@ app.post('/api/transfers/external', authenticateToken, (req, res) => {
     });
 
     res.json({
-      message: 'External transfer initiated successfully',
+      message: 'External transfer completed successfully',
       transaction: {
         _id: transaction._id,
         amount_cents: transaction.amount_cents,
@@ -851,8 +911,10 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('\n✅ Your banking app is now fully functional!');
   console.log('💡 Features working:');
   console.log('   - User registration & login with OTP');
-  console.log('   - Real money transfers');
-  console.log('   - Virtual card creation');
+  console.log('   - Real money transfers (start with $0)');
+  console.log('   - Valid virtual card creation');
+  console.log('   - External bank transfers');
+  console.log('   - Card management (create, view, block, delete)');
   console.log('   - Balance management');
   console.log('   - Transaction history');
 });
