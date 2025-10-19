@@ -95,6 +95,18 @@
             background-color: #f9fafb;
             transform: translateX(4px);
         }
+
+        .organization-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            color: white;
+            transition: all 0.3s ease;
+        }
+
+        .organization-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -141,8 +153,9 @@
             account: null,
             transactions: [],
             cards: [],
+            organizations: [],
             loginData: null,
-            currentView: 'dashboard' // 'dashboard', 'cardDetails', 'cardTransactions'
+            currentView: 'dashboard'
         };
 
         // DOM Elements
@@ -221,8 +234,43 @@
             },
 
             validateCardNumber(cardNumber) {
-                // Simple validation for demo - in real app, use proper validation
-                return cardNumber.length === 16 && /^\d+$/.test(cardNumber);
+                // Luhn algorithm validation
+                if (!/^\d+$/.test(cardNumber) || cardNumber.length < 13 || cardNumber.length > 19) {
+                    return false;
+                }
+
+                let sum = 0;
+                let isEven = false;
+                
+                for (let i = cardNumber.length - 1; i >= 0; i--) {
+                    let digit = parseInt(cardNumber[i]);
+                    
+                    if (isEven) {
+                        digit *= 2;
+                        if (digit > 9) digit -= 9;
+                    }
+                    
+                    sum += digit;
+                    isEven = !isEven;
+                }
+                
+                return sum % 10 === 0;
+            },
+
+            validateCVV(cvv) {
+                return /^\d{3,4}$/.test(cvv);
+            },
+
+            validateExpiry(month, year) {
+                const currentDate = new Date();
+                const currentYear = currentDate.getFullYear();
+                const currentMonth = currentDate.getMonth() + 1;
+                
+                if (year < currentYear) return false;
+                if (year === currentYear && month < currentMonth) return false;
+                if (month < 1 || month > 12) return false;
+                
+                return true;
             }
         };
 
@@ -281,25 +329,53 @@
                         <div class="max-w-md w-full space-y-8 bg-white rounded-2xl shadow-xl p-8 slide-up">
                             <div class="text-center">
                                 <i class="fas fa-piggy-bank text-4xl text-purple-600 mb-4"></i>
-                                <h2 class="text-3xl font-bold text-gray-900" id="authTitle">Sign In</h2>
-                                <p class="mt-2 text-gray-600" id="authSubtitle">Enter your email to receive OTP</p>
+                                <h2 class="text-3xl font-bold text-gray-900" id="authTitle">Welcome to HCB Clone</h2>
+                                <p class="mt-2 text-gray-600">Choose how you'd like to sign in</p>
                             </div>
                             
-                            <form class="mt-8 space-y-6" id="authForm">
+                            <!-- Tab Navigation -->
+                            <div class="flex space-x-1 bg-gray-100 p-1 rounded-lg">
+                                <button id="loginTab" class="flex-1 py-2 px-4 rounded-md font-medium transition-all duration-200 bg-white text-purple-600 shadow-sm">
+                                    I have an account
+                                </button>
+                                <button id="signupTab" class="flex-1 py-2 px-4 rounded-md font-medium transition-all duration-200 text-gray-600 hover:text-gray-900">
+                                    Create account
+                                </button>
+                            </div>
+
+                            <!-- Login Form -->
+                            <form class="mt-6 space-y-6" id="loginForm">
+                                <div>
+                                    <label for="loginEmail" class="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                                    <input id="loginEmail" name="email" type="email" required 
+                                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors duration-200"
+                                           placeholder="your@email.com">
+                                </div>
+
+                                <div>
+                                    <button type="submit"
+                                            class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-all duration-200 transform hover:scale-105">
+                                        <span>Continue to OTP</span>
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- Signup Form -->
+                            <form class="mt-6 space-y-6 hidden" id="signupForm">
                                 <div class="space-y-4">
                                     <div>
-                                        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
-                                        <input id="email" name="email" type="email" required 
+                                        <label for="signupEmail" class="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                                        <input id="signupEmail" name="email" type="email" required 
                                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors duration-200"
                                                placeholder="your@email.com">
                                     </div>
-                                    <div id="nameField" class="hidden">
+                                    <div>
                                         <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                                         <input id="name" name="name" type="text" required
                                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors duration-200"
                                                placeholder="John Doe">
                                     </div>
-                                    <div id="phoneField" class="hidden">
+                                    <div>
                                         <label for="phone" class="block text-sm font-medium text-gray-700 mb-1">Phone (Optional)</label>
                                         <input id="phone" name="phone" type="tel"
                                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors duration-200"
@@ -308,29 +384,22 @@
                                 </div>
 
                                 <div>
-                                    <button type="submit" id="authButton"
+                                    <button type="submit"
                                             class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-all duration-200 transform hover:scale-105">
-                                        <span id="authButtonText">Send OTP</span>
+                                        <span>Create Account</span>
                                     </button>
-                                </div>
-                                
-                                <div class="text-center">
-                                    <button type="button" id="switchAuthMode" 
-                                            class="text-purple-600 hover:text-purple-500 font-medium transition-colors duration-200">
-                                        <span id="switchAuthText">Don't have an account? Sign up</span>
-                                    </button>
-                                </div>
-
-                                <!-- Demo Accounts Info -->
-                                <div class="mt-6 p-4 bg-purple-50 rounded-lg">
-                                    <h4 class="text-sm font-semibold text-purple-800 mb-2">Demo Accounts:</h4>
-                                    <div class="text-xs text-purple-600 space-y-1">
-                                        <div>• demo@hcb.com (Any OTP works)</div>
-                                        <div>• user2@hcb.com (Any OTP works)</div>
-                                        <div class="mt-2 text-purple-500">Or create a new account with any email</div>
-                                    </div>
                                 </div>
                             </form>
+
+                            <!-- Demo Accounts Info -->
+                            <div class="mt-6 p-4 bg-purple-50 rounded-lg">
+                                <h4 class="text-sm font-semibold text-purple-800 mb-2">Demo Accounts:</h4>
+                                <div class="text-xs text-purple-600 space-y-1">
+                                    <div>• demo@hcb.com (Any OTP works)</div>
+                                    <div>• user2@hcb.com (Any OTP works)</div>
+                                    <div class="mt-2 text-purple-500">Or create a new account with any email</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -340,60 +409,64 @@
             },
 
             setupAuthHandlers() {
-                const authForm = document.getElementById('authForm');
-                const switchAuthMode = document.getElementById('switchAuthMode');
-                const authTitle = document.getElementById('authTitle');
-                const authSubtitle = document.getElementById('authSubtitle');
-                const authButton = document.getElementById('authButton');
-                const authButtonText = document.getElementById('authButtonText');
-                const switchAuthText = document.getElementById('switchAuthText');
-                const nameField = document.getElementById('nameField');
-                const phoneField = document.getElementById('phoneField');
-                
-                let isLogin = true;
+                const loginForm = document.getElementById('loginForm');
+                const signupForm = document.getElementById('signupForm');
+                const loginTab = document.getElementById('loginTab');
+                const signupTab = document.getElementById('signupTab');
 
-                switchAuthMode.addEventListener('click', () => {
-                    isLogin = !isLogin;
-                    
-                    if (isLogin) {
-                        authTitle.textContent = 'Sign In';
-                        authSubtitle.textContent = 'Enter your email to receive OTP';
-                        authButtonText.textContent = 'Send OTP';
-                        switchAuthText.textContent = "Don't have an account? Sign up";
-                        nameField.classList.add('hidden');
-                        phoneField.classList.add('hidden');
-                    } else {
-                        authTitle.textContent = 'Create Account';
-                        authSubtitle.textContent = 'Sign up for HCB Clone';
-                        authButtonText.textContent = 'Sign Up';
-                        switchAuthText.textContent = 'Already have an account? Sign in';
-                        nameField.classList.remove('hidden');
-                        phoneField.classList.remove('hidden');
-                    }
+                // Tab switching
+                loginTab.addEventListener('click', () => {
+                    loginTab.classList.add('bg-white', 'text-purple-600', 'shadow-sm');
+                    loginTab.classList.remove('text-gray-600');
+                    signupTab.classList.remove('bg-white', 'text-purple-600', 'shadow-sm');
+                    signupTab.classList.add('text-gray-600');
+                    loginForm.classList.remove('hidden');
+                    signupForm.classList.add('hidden');
                 });
 
-                authForm.addEventListener('submit', async (e) => {
+                signupTab.addEventListener('click', () => {
+                    signupTab.classList.add('bg-white', 'text-purple-600', 'shadow-sm');
+                    signupTab.classList.remove('text-gray-600');
+                    loginTab.classList.remove('bg-white', 'text-purple-600', 'shadow-sm');
+                    loginTab.classList.add('text-gray-600');
+                    signupForm.classList.remove('hidden');
+                    loginForm.classList.add('hidden');
+                });
+
+                // Login form submission
+                loginForm.addEventListener('submit', async (e) => {
                     e.preventDefault();
                     Utils.showLoading();
 
-                    const formData = new FormData(authForm);
+                    const formData = new FormData(loginForm);
+                    const email = formData.get('email');
+
+                    try {
+                        const data = await ApiService.post('/api/auth/login', { email });
+                        AppState.loginData = data;
+                        this.renderOTPScreen();
+                    } catch (error) {
+                        Utils.showToast(error.message, 'error');
+                    } finally {
+                        Utils.hideLoading();
+                    }
+                });
+
+                // Signup form submission
+                signupForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    Utils.showLoading();
+
+                    const formData = new FormData(signupForm);
                     const email = formData.get('email');
                     const name = formData.get('name');
                     const phone = formData.get('phone');
 
                     try {
-                        if (isLogin) {
-                            // Login flow
-                            const data = await ApiService.post('/api/auth/login', { email });
-                            AppState.loginData = data;
-                            this.renderOTPScreen();
-                        } else {
-                            // Signup flow - FIXED: Now properly calls renderOTPScreen
-                            const data = await ApiService.post('/api/auth/signup', { email, name, phone });
-                            AppState.loginData = data;
-                            Utils.showToast('OTP sent to your email!', 'success');
-                            this.renderOTPScreen(); // FIXED: This line was added
-                        }
+                        const data = await ApiService.post('/api/auth/signup', { email, name, phone });
+                        AppState.loginData = data;
+                        Utils.showToast('OTP sent to your email!', 'success');
+                        this.renderOTPScreen();
                     } catch (error) {
                         Utils.showToast(error.message, 'error');
                     } finally {
@@ -538,6 +611,7 @@
                 AppState.currentBalance = 0;
                 AppState.transactions = [];
                 AppState.cards = [];
+                AppState.organizations = [];
                 AppState.loginData = null;
                 AppState.currentView = 'dashboard';
                 
@@ -573,6 +647,11 @@
                 if (AppState.user) {
                     elements.navButtons.innerHTML = `
                         <div class="flex items-center space-x-4">
+                            <button onclick="OrganizationManager.showOrganizations()" 
+                                    class="flex items-center space-x-2 text-gray-700 hover:text-purple-600 transition-colors duration-200">
+                                <i class="fas fa-building"></i>
+                                <span class="hidden md:block">Organizations</span>
+                            </button>
                             <span class="text-gray-700 hidden sm:block">Hello, ${AppState.user.name}</span>
                             <button onclick="DashboardManager.showProfile()" 
                                     class="flex items-center space-x-2 text-gray-700 hover:text-purple-600 transition-colors duration-200">
@@ -623,6 +702,10 @@
                     const cardsData = await ApiService.get('/api/cards');
                     AppState.cards = cardsData.cards;
 
+                    // Load organizations
+                    const organizationsData = await ApiService.get('/api/organizations');
+                    AppState.organizations = organizationsData.organizations;
+
                 } catch (error) {
                     Utils.showToast('Failed to load dashboard data', 'error');
                 } finally {
@@ -671,7 +754,7 @@
                                     </div>
                                 </div>
                                 <div class="bg-white p-6">
-                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                                         <button onclick="DashboardManager.showDepositModal()" 
                                                 class="flex items-center justify-center space-x-2 bg-green-50 text-green-700 px-4 py-3 rounded-lg hover:bg-green-100 transition-colors duration-200">
                                             <i class="fas fa-arrow-down"></i>
@@ -687,41 +770,67 @@
                                             <i class="fas fa-credit-card"></i>
                                             <span>Get Card</span>
                                         </button>
+                                        <button onclick="PaymentManager.showPaymentModal()" 
+                                                class="flex items-center justify-center space-x-2 bg-orange-50 text-orange-700 px-4 py-3 rounded-lg hover:bg-orange-100 transition-colors duration-200">
+                                            <i class="fas fa-shopping-cart"></i>
+                                            <span>Make Payment</span>
+                                        </button>
                                     </div>
                                 </div>
                             </div>
 
                             <!-- Main Content Grid -->
-                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
                                 <!-- Transactions Section -->
-                                <div class="bg-white rounded-lg shadow-sm border border-gray-200">
-                                    <div class="px-6 py-4 border-b border-gray-200">
-                                        <div class="flex justify-between items-center">
-                                            <h3 class="text-lg font-semibold text-gray-900">Recent Transactions</h3>
-                                            <button onclick="DashboardManager.showAllTransactions()" 
-                                                    class="text-purple-600 hover:text-purple-500 text-sm font-medium">
-                                                View All
-                                            </button>
+                                <div class="lg:col-span-2">
+                                    <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                                        <div class="px-6 py-4 border-b border-gray-200">
+                                            <div class="flex justify-between items-center">
+                                                <h3 class="text-lg font-semibold text-gray-900">Recent Transactions</h3>
+                                                <button onclick="DashboardManager.showAllTransactions()" 
+                                                        class="text-purple-600 hover:text-purple-500 text-sm font-medium">
+                                                    View All
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div class="divide-y divide-gray-200 min-h-[400px]" id="transactionsList">
-                                        ${this.renderTransactions()}
+                                        <div class="divide-y divide-gray-200 min-h-[400px]" id="transactionsList">
+                                            ${this.renderTransactions()}
+                                        </div>
                                     </div>
                                 </div>
 
-                                <!-- Cards Section -->
-                                <div class="bg-white rounded-lg shadow-sm border border-gray-200">
-                                    <div class="px-6 py-4 border-b border-gray-200">
-                                        <div class="flex justify-between items-center">
-                                            <h3 class="text-lg font-semibold text-gray-900">Virtual Cards</h3>
-                                            <button onclick="CardManager.showCreateCardModal()" 
-                                                    class="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 transition-colors duration-200">
-                                                + New Card
-                                            </button>
+                                <!-- Cards & Organizations Section -->
+                                <div class="space-y-8">
+                                    <!-- Cards Section -->
+                                    <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                                        <div class="px-6 py-4 border-b border-gray-200">
+                                            <div class="flex justify-between items-center">
+                                                <h3 class="text-lg font-semibold text-gray-900">Virtual Cards</h3>
+                                                <button onclick="CardManager.showCreateCardModal()" 
+                                                        class="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 transition-colors duration-200">
+                                                    + New Card
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="p-6" id="cardsList">
+                                            ${this.renderCards()}
                                         </div>
                                     </div>
-                                    <div class="p-6" id="cardsList">
-                                        ${this.renderCards()}
+
+                                    <!-- Organizations Section -->
+                                    <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                                        <div class="px-6 py-4 border-b border-gray-200">
+                                            <div class="flex justify-between items-center">
+                                                <h3 class="text-lg font-semibold text-gray-900">My Organizations</h3>
+                                                <button onclick="OrganizationManager.showCreateOrganizationModal()" 
+                                                        class="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 transition-colors duration-200">
+                                                    + New
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="p-6" id="organizationsList">
+                                            ${this.renderOrganizations()}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -791,10 +900,12 @@
                     <div class="virtual-card p-6 mb-4 card-hover" onclick="CardManager.showCardDetailsView('${card._id}')">
                         <div class="flex justify-between items-start mb-4">
                             <div>
-                                <div class="text-sm opacity-80">Virtual Card Balance</div>
-                                <div class="text-2xl font-bold mt-1">
-                                    ${Utils.formatCurrency(card.balance_cents)}
-                                </div>
+                                <div class="text-sm opacity-80">Card Holder</div>
+                                <div class="text-lg font-bold mt-1 card-owner-display">${card.card_owner || AppState.user.name}</div>
+                                <button onclick="event.stopPropagation(); CardManager.showUpdateOwnerModal('${card._id}')" 
+                                        class="text-xs text-white opacity-80 hover:opacity-100 mt-1 transition-opacity duration-200">
+                                    <i class="fas fa-edit mr-1"></i>Change Name
+                                </button>
                             </div>
                             <div class="text-right">
                                 <div class="text-sm opacity-80">${card.brand}</div>
@@ -802,6 +913,12 @@
                             </div>
                         </div>
                         <div class="flex justify-between items-center mb-4">
+                            <div>
+                                <div class="text-sm opacity-80">Card Balance</div>
+                                <div class="text-2xl font-bold mt-1">
+                                    ${Utils.formatCurrency(card.balance_cents)}
+                                </div>
+                            </div>
                             <div>
                                 <div class="text-sm opacity-80">Card Number</div>
                                 <div class="text-xl font-semibold tracking-wider mt-1">
@@ -824,16 +941,37 @@
                                     <i class="fas fa-exchange-alt mr-1"></i>
                                     Transfer
                                 </button>
-                                <button onclick="event.stopPropagation(); CardManager.toggleCardBlock('${card._id}')" 
-                                        class="text-white hover:text-gray-200 transition-colors duration-200 text-sm">
-                                    <i class="fas ${card.status === 'active' ? 'fa-lock' : 'fa-unlock'} mr-1"></i>
-                                    ${card.status === 'active' ? 'Block' : 'Unblock'}
-                                </button>
-                                <button onclick="event.stopPropagation(); CardManager.deleteCard('${card._id}')" 
-                                        class="text-white hover:text-red-200 transition-colors duration-200 text-sm">
-                                    <i class="fas fa-trash mr-1"></i>
-                                    Delete
-                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            },
+
+            renderOrganizations() {
+                if (!AppState.organizations.length) {
+                    return `
+                        <div class="flex flex-col items-center justify-center py-8 text-gray-500">
+                            <i class="fas fa-building text-4xl mb-4 text-gray-300"></i>
+                            <p class="text-lg mb-2">No organizations</p>
+                            <p class="text-sm text-center mb-4">Create or join an organization to manage finances together</p>
+                            <button onclick="OrganizationManager.showCreateOrganizationModal()" 
+                                    class="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition-colors duration-200">
+                                Create Organization
+                            </button>
+                        </div>
+                    `;
+                }
+
+                return AppState.organizations.slice(0, 3).map(org => `
+                    <div class="organization-card p-4 mb-3" onclick="OrganizationManager.showOrganizationDetails('${org._id}')">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <div class="font-semibold text-lg">${org.name}</div>
+                                <div class="text-sm opacity-80 mt-1">${org.description || 'No description'}</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-sm opacity-80">${org.members.length} members</div>
+                                <div class="text-xs mt-1">${org.owner_id === AppState.user._id ? 'Owner' : 'Member'}</div>
                             </div>
                         </div>
                     </div>
@@ -841,123 +979,11 @@
             },
 
             showAllTransactions() {
-                const modal = document.createElement('div');
-                modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in overflow-y-auto';
-                modal.innerHTML = `
-                    <div class="bg-white rounded-2xl shadow-xl max-w-4xl w-full slide-up my-8 max-h-[90vh] overflow-hidden">
-                        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                            <h3 class="text-xl font-semibold text-gray-900">All Transactions</h3>
-                            <button onclick="this.closest('.fixed').remove()" 
-                                    class="text-gray-400 hover:text-gray-600 transition-colors duration-200">
-                                <i class="fas fa-times text-xl"></i>
-                            </button>
-                        </div>
-                        <div class="p-6 overflow-y-auto max-h-[70vh]">
-                            <div class="space-y-4">
-                                ${AppState.transactions.map(transaction => `
-                                    <div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors duration-150">
-                                        <div class="flex items-center space-x-4 flex-1">
-                                            <div class="flex-shrink-0 ${transaction.amount_cents > 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'} rounded-lg p-3">
-                                                <i class="fas ${transaction.amount_cents > 0 ? 'fa-arrow-down' : 'fa-arrow-up'}"></i>
-                                            </div>
-                                            <div class="flex-1 min-w-0">
-                                                <div class="font-medium text-gray-900">
-                                                    ${transaction.description || 'Transaction'}
-                                                </div>
-                                                <div class="text-sm text-gray-500 mt-1">
-                                                    ${Utils.formatDate(transaction.created_at)}
-                                                    ${transaction.counterparty_name ? `• ${transaction.counterparty_name}` : ''}
-                                                    ${transaction.counterparty_card ? `• Card ${transaction.counterparty_card}` : ''}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="text-right">
-                                            <div class="font-semibold ${transaction.amount_cents > 0 ? 'text-green-600' : 'text-red-600'}">
-                                                ${transaction.amount_cents > 0 ? '+' : ''}${Utils.formatCurrency(transaction.amount_cents)}
-                                            </div>
-                                            <div class="text-xs text-gray-500 capitalize">${transaction.status}</div>
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        <div class="px-6 py-4 border-t border-gray-200 bg-gray-50">
-                            <button onclick="this.closest('.fixed').remove()" 
-                                    class="w-full bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
-                                Close
-                            </button>
-                        </div>
-                    </div>
-                `;
-
-                document.body.appendChild(modal);
+                // ... existing code ...
             },
 
             showDepositModal() {
-                const modal = document.createElement('div');
-                modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in';
-                modal.innerHTML = `
-                    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
-                        <div class="px-6 py-4 border-b border-gray-200">
-                            <h3 class="text-xl font-semibold text-gray-900">Deposit Funds</h3>
-                        </div>
-                        <form id="depositForm" class="p-6 space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Amount (USD)</label>
-                                <input type="number" step="0.01" min="1" required 
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="0.00">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Description (Optional)</label>
-                                <input type="text"
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="e.g., Initial deposit">
-                            </div>
-                            <div class="flex space-x-3 pt-4">
-                                <button type="button" onclick="this.closest('.fixed').remove()" 
-                                        class="flex-1 bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-colors duration-200 font-medium">
-                                    Cancel
-                                </button>
-                                <button type="submit" 
-                                        class="flex-1 bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
-                                    Deposit
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                `;
-
-                document.body.appendChild(modal);
-
-                modal.querySelector('#depositForm').addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const amount = parseFloat(e.target.querySelector('input[type="number"]').value);
-                    const description = e.target.querySelector('input[type="text"]').value;
-                    
-                    if (amount < 1) {
-                        Utils.showToast('Minimum deposit amount is $1.00', 'error');
-                        return;
-                    }
-
-                    Utils.showLoading();
-                    try {
-                        await ApiService.post('/api/account/deposit', {
-                            amount_cents: Math.round(amount * 100),
-                            currency: 'USD',
-                            description
-                        });
-
-                        Utils.showToast('Deposit initiated successfully!', 'success');
-                        modal.remove();
-                        await this.loadDashboardData();
-                        this.renderDashboard();
-                    } catch (error) {
-                        Utils.showToast(error.message, 'error');
-                    } finally {
-                        Utils.hideLoading();
-                    }
-                });
+                // ... existing code ...
             },
 
             showTransferModal() {
@@ -991,6 +1017,17 @@
                                         <div class="text-sm text-gray-500">Send to any US bank account</div>
                                     </div>
                                 </button>
+
+                                <button onclick="this.closest('.fixed').remove(); TransferManager.showCardToBankTransferModal()" 
+                                        class="flex items-center space-x-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors duration-200 text-left">
+                                    <div class="flex-shrink-0 w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                                        <i class="fas fa-credit-card text-purple-600 text-xl"></i>
+                                    </div>
+                                    <div>
+                                        <div class="font-semibold text-gray-900">Card to Bank Transfer</div>
+                                        <div class="text-sm text-gray-500">Transfer from card to bank account</div>
+                                    </div>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1000,77 +1037,7 @@
             },
 
             showInternalTransferModal() {
-                const modal = document.createElement('div');
-                modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in';
-                modal.innerHTML = `
-                    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
-                        <div class="px-6 py-4 border-b border-gray-200">
-                            <h3 class="text-xl font-semibold text-gray-900">Transfer to HCB User</h3>
-                        </div>
-                        <form id="transferForm" class="p-6 space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Recipient Email</label>
-                                <input type="email" required 
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="recipient@example.com">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Amount (USD)</label>
-                                <input type="number" step="0.01" min="0.01" required 
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="0.00">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Description (Optional)</label>
-                                <input type="text"
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="e.g., Payment for services">
-                            </div>
-                            <div class="flex space-x-3 pt-4">
-                                <button type="button" onclick="this.closest('.fixed').remove()" 
-                                        class="flex-1 bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-colors duration-200 font-medium">
-                                    Cancel
-                                </button>
-                                <button type="submit" 
-                                        class="flex-1 bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
-                                    Send Money
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                `;
-
-                document.body.appendChild(modal);
-
-                modal.querySelector('#transferForm').addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const recipient_email = e.target.querySelector('input[type="email"]').value;
-                    const amount = parseFloat(e.target.querySelector('input[type="number"]').value);
-                    const description = e.target.querySelector('input[type="text"]').value;
-
-                    if (amount <= 0) {
-                        Utils.showToast('Please enter a valid amount', 'error');
-                        return;
-                    }
-
-                    Utils.showLoading();
-                    try {
-                        await ApiService.post('/api/account/transfer', {
-                            amount_cents: Math.round(amount * 100),
-                            recipient_email,
-                            description
-                        });
-
-                        Utils.showToast('Transfer completed successfully!', 'success');
-                        modal.remove();
-                        await this.loadDashboardData();
-                        this.renderDashboard();
-                    } catch (error) {
-                        Utils.showToast(error.message, 'error');
-                    } finally {
-                        Utils.hideLoading();
-                    }
-                });
+                // ... existing code ...
             },
 
             async showProfile() {
@@ -1145,6 +1112,26 @@
                                                            placeholder="+1 (555) 123-4567">
                                                 </div>
 
+                                                <!-- Organization Section -->
+                                                <div class="border-t pt-6">
+                                                    <h4 class="text-md font-semibold text-gray-900 mb-4">Organization</h4>
+                                                    <div class="space-y-3">
+                                                        <div>
+                                                            <label class="block text-sm font-medium text-gray-700 mb-2">Current Organization</label>
+                                                            <select name="organization_id" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                                                <option value="">No Organization</option>
+                                                                ${AppState.organizations.map(org => `
+                                                                    <option value="${org._id}" ${AppState.user.organization_id === org._id ? 'selected' : ''}>${org.name}</option>
+                                                                `).join('')}
+                                                            </select>
+                                                        </div>
+                                                        <button type="button" onclick="OrganizationManager.showCreateOrganizationModal()" 
+                                                                class="text-purple-600 hover:text-purple-500 text-sm font-medium">
+                                                            + Create New Organization
+                                                        </button>
+                                                    </div>
+                                                </div>
+
                                                 <div class="border-t pt-6">
                                                     <h4 class="text-md font-semibold text-gray-900 mb-4">Account Status</h4>
                                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
@@ -1204,7 +1191,8 @@
                 try {
                     const updates = {
                         name: formData.get('name'),
-                        phone: formData.get('phone')
+                        phone: formData.get('phone'),
+                        organization_id: formData.get('organization_id')
                     };
 
                     const data = await ApiService.put('/api/profile', updates);
@@ -1324,16 +1312,26 @@
                                 <div class="virtual-card p-6">
                                     <div class="flex justify-between items-start mb-6">
                                         <div>
-                                            <div class="text-sm opacity-80">Card Balance</div>
+                                            <div class="text-sm opacity-80">Card Holder</div>
+                                            <div class="text-xl font-bold mt-1 card-owner-display">${card.card_owner || AppState.user.name}</div>
+                                            <button onclick="CardManager.showUpdateOwnerModal('${card._id}')" 
+                                                    class="text-sm text-white opacity-80 hover:opacity-100 mt-2 transition-opacity duration-200">
+                                                <i class="fas fa-edit mr-1"></i>Change Name
+                                            </button>
+                                            <div class="text-sm opacity-80 mt-4">Card Balance</div>
                                             <div class="text-2xl font-bold mt-1">${Utils.formatCurrency(card.balance_cents)}</div>
-                                            <div class="text-sm opacity-80 mt-4">Card Number</div>
-                                            <div class="text-xl font-semibold tracking-wider mt-1">
-                                                ${Utils.maskCardNumber(card.card_number)}
-                                            </div>
                                         </div>
                                         <div class="text-right">
                                             <div class="text-sm opacity-80">${card.brand}</div>
                                             <div class="text-sm mt-1">${Utils.formatCardDate(card.expiry_month, card.expiry_year)}</div>
+                                        </div>
+                                    </div>
+                                    <div class="flex justify-between items-center mb-4">
+                                        <div>
+                                            <div class="text-sm opacity-80">Card Number</div>
+                                            <div class="text-xl font-semibold tracking-wider mt-1">
+                                                ${Utils.maskCardNumber(card.card_number)}
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="flex justify-between items-center">
@@ -1435,113 +1433,21 @@
                 elements.mainContent.innerHTML = cardDetailsHTML;
             },
 
-            async showCardTransactions(cardId) {
-                AppState.currentView = 'cardTransactions';
-                Utils.showLoading();
-                try {
-                    const response = await ApiService.get(`/api/cards/${cardId}/transactions`);
-                    const card = await ApiService.get(`/api/cards/${cardId}`);
-                    this.renderCardTransactionsView(card.card, response.transactions);
-                } catch (error) {
-                    Utils.showToast('Failed to load card transactions', 'error');
-                    this.showCardDetailsView(cardId);
-                } finally {
-                    Utils.hideLoading();
-                }
-            },
-
-            renderCardTransactionsView(card, transactions) {
-                const transactionsHTML = `
-                    <div class="max-w-4xl mx-auto py-6 sm:px-6 lg:px-8 fade-in">
-                        <div class="px-4 py-6 sm:px-0">
-                            <!-- Header -->
-                            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-                                <div class="flex items-center justify-between">
-                                    <div>
-                                        <button onclick="CardManager.showCardDetailsView('${card._id}')" 
-                                                class="flex items-center space-x-2 text-purple-600 hover:text-purple-700 transition-colors duration-200 mb-2">
-                                            <i class="fas fa-arrow-left"></i>
-                                            <span>Back to Card Details</span>
-                                        </button>
-                                        <h1 class="text-2xl font-bold text-gray-900">Card Transactions</h1>
-                                        <p class="text-gray-600 mt-1">${Utils.maskCardNumber(card.card_number)} • ${card.brand}</p>
-                                    </div>
-                                    <div class="text-right">
-                                        <div class="text-sm text-gray-600">Current Balance</div>
-                                        <div class="text-xl font-bold text-gray-900">${Utils.formatCurrency(card.balance_cents)}</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Transactions List -->
-                            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
-                                <div class="px-6 py-4 border-b border-gray-200">
-                                    <h3 class="text-lg font-semibold text-gray-900">All Transactions</h3>
-                                </div>
-                                <div class="divide-y divide-gray-200">
-                                    ${this.renderCardTransactions(transactions)}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-
-                elements.mainContent.innerHTML = transactionsHTML;
-            },
-
-            renderCardTransactions(transactions) {
-                if (!transactions.length) {
-                    return `
-                        <div class="flex flex-col items-center justify-center py-12 text-gray-500">
-                            <i class="fas fa-receipt text-4xl mb-4 text-gray-300"></i>
-                            <p class="text-lg">No transactions yet</p>
-                            <p class="text-sm mt-1">Card transactions will appear here</p>
-                        </div>
-                    `;
-                }
-
-                return transactions.map(transaction => `
-                    <div class="px-6 py-4 hover:bg-gray-50 transition-colors duration-150 transaction-item">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-4">
-                                <div class="flex-shrink-0 ${transaction.amount_cents > 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'} rounded-lg p-2">
-                                    <i class="fas ${transaction.amount_cents > 0 ? 'fa-arrow-down' : 'fa-arrow-up'}"></i>
-                                </div>
-                                <div>
-                                    <div class="font-medium text-gray-900">
-                                        ${transaction.description || 'Transaction'}
-                                    </div>
-                                    <div class="text-sm text-gray-500">
-                                        ${Utils.formatDate(transaction.created_at)}
-                                        ${transaction.counterparty_card ? `• Card ${transaction.counterparty_card}` : ''}
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="text-right">
-                                <div class="font-semibold ${transaction.amount_cents > 0 ? 'text-green-600' : 'text-red-600'}">
-                                    ${transaction.amount_cents > 0 ? '+' : ''}${Utils.formatCurrency(transaction.amount_cents)}
-                                </div>
-                                <div class="text-xs text-gray-500 capitalize">${transaction.status}</div>
-                            </div>
-                        </div>
-                    </div>
-                `).join('');
-            },
-
-            showFundCardModal(cardId) {
+            showUpdateOwnerModal(cardId) {
+                const card = AppState.cards.find(c => c._id === cardId);
                 const modal = document.createElement('div');
                 modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in';
                 modal.innerHTML = `
                     <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
                         <div class="px-6 py-4 border-b border-gray-200">
-                            <h3 class="text-xl font-semibold text-gray-900">Add Funds to Card</h3>
+                            <h3 class="text-xl font-semibold text-gray-900">Update Card Owner Name</h3>
                         </div>
-                        <form id="fundCardForm" class="p-6 space-y-4">
+                        <form id="updateOwnerForm" class="p-6 space-y-4">
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Amount (USD)</label>
-                                <input type="number" step="0.01" min="1" required 
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Card Holder Name</label>
+                                <input type="text" value="${card.card_owner || AppState.user.name}" required 
                                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="0.00">
+                                       placeholder="Enter card holder name">
                             </div>
                             <div class="flex space-x-3 pt-4">
                                 <button type="button" onclick="this.closest('.fixed').remove()" 
@@ -1550,7 +1456,7 @@
                                 </button>
                                 <button type="submit" 
                                         class="flex-1 bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
-                                    Add Funds
+                                    Update Name
                                 </button>
                             </div>
                         </form>
@@ -1559,25 +1465,20 @@
 
                 document.body.appendChild(modal);
 
-                modal.querySelector('#fundCardForm').addEventListener('submit', async (e) => {
+                modal.querySelector('#updateOwnerForm').addEventListener('submit', async (e) => {
                     e.preventDefault();
-                    const amount = parseFloat(e.target.querySelector('input[type="number"]').value);
-                    
-                    if (amount < 1) {
-                        Utils.showToast('Minimum amount is $1.00', 'error');
-                        return;
-                    }
+                    const cardOwner = e.target.querySelector('input[type="text"]').value;
 
                     Utils.showLoading();
                     try {
-                        await ApiService.post(`/api/cards/${cardId}/fund`, {
-                            amount_cents: Math.round(amount * 100)
+                        await ApiService.put(`/api/cards/${cardId}`, {
+                            card_owner: cardOwner
                         });
 
-                        Utils.showToast('Card funded successfully!', 'success');
+                        Utils.showToast('Card owner name updated successfully!', 'success');
                         modal.remove();
                         await DashboardManager.loadDashboardData();
-                        if (AppState.currentView === 'cardDetails' || AppState.currentView === 'cardTransactions') {
+                        if (AppState.currentView === 'cardDetails') {
                             this.showCardDetailsView(cardId);
                         } else {
                             DashboardManager.renderDashboard();
@@ -1590,21 +1491,60 @@
                 });
             },
 
+            async showCardTransactions(cardId) {
+                // ... existing code ...
+            },
+
+            renderCardTransactions(transactions) {
+                // ... existing code ...
+            },
+
+            showFundCardModal(cardId) {
+                // ... existing code ...
+            },
+
             showCardTransferModal(fromCardId) {
                 const modal = document.createElement('div');
                 modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in';
                 modal.innerHTML = `
                     <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
                         <div class="px-6 py-4 border-b border-gray-200">
-                            <h3 class="text-xl font-semibold text-gray-900">Transfer Between Cards</h3>
+                            <h3 class="text-xl font-semibold text-gray-900">Transfer Money</h3>
                         </div>
                         <form id="cardTransferForm" class="p-6 space-y-4">
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Destination Card Number</label>
-                                <input type="text" required 
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="Enter full 16-digit card number">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Transfer Type</label>
+                                <select id="transferType" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    <option value="card">To Another Card</option>
+                                    <option value="bank">To Bank Account</option>
+                                </select>
                             </div>
+
+                            <div id="cardFields">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Destination Card Number</label>
+                                    <input type="text" required 
+                                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent card-number-input"
+                                           placeholder="Enter 16-digit card number">
+                                    <div class="text-xs text-gray-500 mt-1 card-validation-message"></div>
+                                </div>
+                            </div>
+
+                            <div id="bankFields" class="hidden">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Bank Account Number</label>
+                                    <input type="text" 
+                                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                           placeholder="Enter account number">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Routing Number</label>
+                                    <input type="text" 
+                                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                           placeholder="Enter routing number">
+                                </div>
+                            </div>
+
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">Amount (USD)</label>
                                 <input type="number" step="0.01" min="0.01" required 
@@ -1633,9 +1573,43 @@
 
                 document.body.appendChild(modal);
 
+                // Transfer type toggle
+                const transferType = modal.querySelector('#transferType');
+                const cardFields = modal.querySelector('#cardFields');
+                const bankFields = modal.querySelector('#bankFields');
+
+                transferType.addEventListener('change', (e) => {
+                    if (e.target.value === 'card') {
+                        cardFields.classList.remove('hidden');
+                        bankFields.classList.add('hidden');
+                    } else {
+                        cardFields.classList.add('hidden');
+                        bankFields.classList.remove('hidden');
+                    }
+                });
+
+                // Card number validation
+                const cardInput = modal.querySelector('.card-number-input');
+                const validationMessage = modal.querySelector('.card-validation-message');
+
+                cardInput.addEventListener('input', (e) => {
+                    const cardNumber = e.target.value.replace(/\s/g, '');
+                    if (cardNumber.length === 16) {
+                        if (Utils.validateCardNumber(cardNumber)) {
+                            validationMessage.textContent = '✓ Valid card number';
+                            validationMessage.className = 'text-xs text-green-600 mt-1';
+                        } else {
+                            validationMessage.textContent = '✗ Invalid card number';
+                            validationMessage.className = 'text-xs text-red-600 mt-1';
+                        }
+                    } else {
+                        validationMessage.textContent = '';
+                    }
+                });
+
                 modal.querySelector('#cardTransferForm').addEventListener('submit', async (e) => {
                     e.preventDefault();
-                    const to_card_number = e.target.querySelector('input[type="text"]').value;
+                    const transferType = modal.querySelector('#transferType').value;
                     const amount = parseFloat(e.target.querySelector('input[type="number"]').value);
                     const description = e.target.querySelector('input[type="text"][placeholder*="Description"]').value;
 
@@ -1644,21 +1618,40 @@
                         return;
                     }
 
-                    if (!Utils.validateCardNumber(to_card_number)) {
-                        Utils.showToast('Please enter a valid 16-digit card number', 'error');
-                        return;
-                    }
-
                     Utils.showLoading();
                     try {
-                        await ApiService.post('/api/cards/transfer', {
-                            from_card_id: fromCardId,
-                            to_card_number: to_card_number,
-                            amount_cents: Math.round(amount * 100),
-                            description
-                        });
+                        if (transferType === 'card') {
+                            const to_card_number = modal.querySelector('.card-number-input').value.replace(/\s/g, '');
+                            
+                            if (!Utils.validateCardNumber(to_card_number)) {
+                                Utils.showToast('Please enter a valid 16-digit card number', 'error');
+                                Utils.hideLoading();
+                                return;
+                            }
 
-                        Utils.showToast('Card transfer successful!', 'success');
+                            await ApiService.post('/api/cards/transfer', {
+                                from_card_id: fromCardId,
+                                to_card_number: to_card_number,
+                                amount_cents: Math.round(amount * 100),
+                                description
+                            });
+
+                            Utils.showToast('Card transfer successful!', 'success');
+                        } else {
+                            const account_number = modal.querySelector('#bankFields input:nth-child(1)').value;
+                            const routing_number = modal.querySelector('#bankFields input:nth-child(2)').value;
+
+                            await ApiService.post('/api/cards/transfer-to-bank', {
+                                card_id: fromCardId,
+                                account_number: account_number,
+                                routing_number: routing_number,
+                                amount_cents: Math.round(amount * 100),
+                                description
+                            });
+
+                            Utils.showToast('Bank transfer successful!', 'success');
+                        }
+
                         modal.remove();
                         await DashboardManager.loadDashboardData();
                         if (AppState.currentView === 'cardDetails' || AppState.currentView === 'cardTransactions') {
@@ -1675,169 +1668,122 @@
             },
 
             showCardDetailsModal(card) {
-                const modal = document.createElement('div');
-                modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in';
-                modal.innerHTML = `
-                    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
-                        <div class="px-6 py-4 border-b border-gray-200">
-                            <h3 class="text-xl font-semibold text-gray-900">Your New Virtual Card</h3>
-                        </div>
-                        <div class="p-6">
-                            <div class="virtual-card p-6 mb-6">
-                                <div class="flex justify-between items-start mb-6">
+                // ... existing code ...
+            },
+
+            async toggleCardBlock(cardId) {
+                // ... existing code ...
+            },
+
+            async deleteCard(cardId) {
+                // ... existing code ...
+            }
+        };
+
+        // Organization Management
+        const OrganizationManager = {
+            async showOrganizations() {
+                AppState.currentView = 'organizations';
+                Utils.showLoading();
+                try {
+                    const response = await ApiService.get('/api/organizations/all');
+                    this.renderOrganizationsView(response.organizations);
+                } catch (error) {
+                    Utils.showToast('Failed to load organizations', 'error');
+                    DashboardManager.initialize();
+                } finally {
+                    Utils.hideLoading();
+                }
+            },
+
+            renderOrganizationsView(organizations) {
+                const organizationsHTML = `
+                    <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8 fade-in">
+                        <div class="px-4 py-6 sm:px-0">
+                            <!-- Header -->
+                            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+                                <div class="flex items-center justify-between">
                                     <div>
-                                        <div class="text-sm opacity-80">Card Balance</div>
-                                        <div class="text-2xl font-bold mt-1">${Utils.formatCurrency(card.balance_cents)}</div>
-                                        <div class="text-sm opacity-80 mt-4">Card Number</div>
-                                        <div class="text-xl font-semibold tracking-wider mt-1">
-                                            ${Utils.maskCardNumber(card.card_number)}
+                                        <button onclick="DashboardManager.initialize()" 
+                                                class="flex items-center space-x-2 text-purple-600 hover:text-purple-700 transition-colors duration-200 mb-2">
+                                            <i class="fas fa-arrow-left"></i>
+                                            <span>Back to Dashboard</span>
+                                        </button>
+                                        <h1 class="text-2xl font-bold text-gray-900">Organizations</h1>
+                                        <p class="text-gray-600 mt-1">Browse and manage organizations</p>
+                                    </div>
+                                    <button onclick="OrganizationManager.showCreateOrganizationModal()" 
+                                            class="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition-colors duration-200">
+                                        Create Organization
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Organizations Grid -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                ${organizations.map(org => `
+                                    <div class="organization-card p-6 cursor-pointer" onclick="OrganizationManager.showOrganizationDetails('${org._id}')">
+                                        <div class="flex justify-between items-start mb-4">
+                                            <div>
+                                                <h3 class="text-xl font-bold">${org.name}</h3>
+                                                <p class="text-sm opacity-80 mt-1">${org.description || 'No description'}</p>
+                                            </div>
+                                            <div class="text-right">
+                                                <div class="text-sm opacity-80">${org.members.length} members</div>
+                                                <div class="text-xs mt-1 ${org.owner_id === AppState.user._id ? 'bg-yellow-500 text-white px-2 py-1 rounded' : ''}">
+                                                    ${org.owner_id === AppState.user._id ? 'Owner' : 'View Only'}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="flex justify-between items-center text-sm">
+                                            <span>Created ${new Date(org.created_at).toLocaleDateString()}</span>
+                                            <button onclick="event.stopPropagation(); OrganizationManager.joinOrganization('${org._id}')" 
+                                                    class="bg-white bg-opacity-20 hover:bg-opacity-30 px-3 py-1 rounded transition-all duration-200">
+                                                Join
+                                            </button>
                                         </div>
                                     </div>
-                                    <div class="text-right">
-                                        <div class="text-sm opacity-80">${card.brand}</div>
-                                        <div class="text-sm mt-1">${Utils.formatCardDate(card.expiry_month, card.expiry_year)}</div>
-                                    </div>
-                                </div>
-                                <div class="flex justify-between items-center">
-                                    <span class="px-3 py-1 rounded-full text-xs font-medium bg-green-500">
-                                        ACTIVE
-                                    </span>
-                                    <div class="text-sm opacity-80">CVV: ${card.cvv}</div>
-                                </div>
-                            </div>
-                            
-                            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-                                <div class="flex items-start space-x-3">
-                                    <i class="fas fa-exclamation-triangle text-yellow-600 mt-1"></i>
-                                    <div class="text-sm text-yellow-800">
-                                        <p class="font-medium">Save Your Card Details</p>
-                                        <p class="mt-1">For security reasons, we won't show your full card number again in the card list. Please save these details in a secure place.</p>
-                                    </div>
-                                </div>
+                                `).join('')}
                             </div>
 
-                            <div class="grid grid-cols-2 gap-4 text-sm mb-6">
-                                <div>
-                                    <span class="text-gray-600">Card Number:</span>
-                                    <div class="font-mono font-semibold">${card.card_number}</div>
+                            ${!organizations.length ? `
+                                <div class="text-center py-12">
+                                    <i class="fas fa-building text-4xl text-gray-300 mb-4"></i>
+                                    <h3 class="text-lg font-semibold text-gray-900 mb-2">No Organizations Yet</h3>
+                                    <p class="text-gray-600 mb-4">Be the first to create an organization!</p>
+                                    <button onclick="OrganizationManager.showCreateOrganizationModal()" 
+                                            class="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors duration-200">
+                                        Create First Organization
+                                    </button>
                                 </div>
-                                <div>
-                                    <span class="text-gray-600">Expiry:</span>
-                                    <div class="font-semibold">${Utils.formatCardDate(card.expiry_month, card.expiry_year)}</div>
-                                </div>
-                                <div>
-                                    <span class="text-gray-600">CVV:</span>
-                                    <div class="font-mono font-semibold">${card.cvv}</div>
-                                </div>
-                                <div>
-                                    <span class="text-gray-600">Balance:</span>
-                                    <div class="font-semibold">${Utils.formatCurrency(card.balance_cents)}</div>
-                                </div>
-                            </div>
-
-                            <div class="flex space-x-3">
-                                <button onclick="CardManager.showCardDetailsView('${card._id}')" 
-                                        class="flex-1 bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
-                                    View Details
-                                </button>
-                                <button onclick="this.closest('.fixed').remove()" 
-                                        class="flex-1 bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-colors duration-200 font-medium">
-                                    Close
-                                </button>
-                            </div>
+                            ` : ''}
                         </div>
                     </div>
                 `;
 
-                document.body.appendChild(modal);
+                elements.mainContent.innerHTML = organizationsHTML;
             },
 
-            async toggleCardBlock(cardId) {
-                Utils.showLoading();
-                try {
-                    const data = await ApiService.post(`/api/cards/${cardId}/block`, {});
-                    
-                    Utils.showToast(`Card ${data.card.status === 'active' ? 'unblocked' : 'blocked'} successfully`, 'success');
-                    
-                    await DashboardManager.loadDashboardData();
-                    if (AppState.currentView === 'cardDetails' || AppState.currentView === 'cardTransactions') {
-                        this.showCardDetailsView(cardId);
-                    } else {
-                        DashboardManager.renderDashboard();
-                    }
-                    
-                } catch (error) {
-                    Utils.showToast(error.message, 'error');
-                } finally {
-                    Utils.hideLoading();
-                }
-            },
-
-            async deleteCard(cardId) {
-                if (!confirm('Are you sure you want to delete this card? Any remaining balance will be returned to your account.')) {
-                    return;
-                }
-
-                Utils.showLoading();
-                try {
-                    const result = await ApiService.delete(`/api/cards/${cardId}`);
-                    
-                    Utils.showToast('Card deleted successfully' + (result.balance_returned > 0 ? ` - $${(result.balance_returned/100).toFixed(2)} returned to account` : ''), 'success');
-                    
-                    // Close any open modals
-                    document.querySelectorAll('.fixed.inset-0').forEach(modal => modal.remove());
-                    
-                    await DashboardManager.loadDashboardData();
-                    DashboardManager.initialize();
-                    
-                } catch (error) {
-                    Utils.showToast(error.message, 'error');
-                } finally {
-                    Utils.hideLoading();
-                }
-            }
-        };
-
-        // Transfer Management
-        const TransferManager = {
-            showExternalTransferModal() {
+            showCreateOrganizationModal() {
                 const modal = document.createElement('div');
                 modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in';
                 modal.innerHTML = `
                     <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
                         <div class="px-6 py-4 border-b border-gray-200">
-                            <h3 class="text-xl font-semibold text-gray-900">External Bank Transfer</h3>
+                            <h3 class="text-xl font-semibold text-gray-900">Create Organization</h3>
                         </div>
-                        <form id="externalTransferForm" class="p-6 space-y-4">
+                        <form id="createOrganizationForm" class="p-6 space-y-4">
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Recipient Name</label>
-                                <input type="text" name="recipient_name" required
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Organization Name</label>
+                                <input type="text" name="name" required 
                                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="John Doe">
+                                       placeholder="Enter organization name">
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Account Number</label>
-                                <input type="text" name="recipient_account_number" required
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                                <textarea name="description" rows="3"
                                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="1234567890">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Routing Number</label>
-                                <input type="text" name="routing_number" required
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="021000021">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Amount (USD)</label>
-                                <input type="number" step="0.01" min="1" name="amount_cents" required
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="0.00">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Description (Optional)</label>
-                                <input type="text" name="description"
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                       placeholder="Payment for services">
+                                       placeholder="Describe your organization"></textarea>
                             </div>
                             <div class="flex space-x-3 pt-4">
                                 <button type="button" onclick="this.closest('.fixed').remove()" 
@@ -1846,7 +1792,7 @@
                                 </button>
                                 <button type="submit" 
                                         class="flex-1 bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
-                                    Send Transfer
+                                    Create
                                 </button>
                             </div>
                         </form>
@@ -1855,25 +1801,405 @@
 
                 document.body.appendChild(modal);
 
-                modal.querySelector('#externalTransferForm').addEventListener('submit', async (e) => {
+                modal.querySelector('#createOrganizationForm').addEventListener('submit', async (e) => {
                     e.preventDefault();
-                    Utils.showLoading();
-
                     const formData = new FormData(e.target);
-                    const amount = parseFloat(formData.get('amount_cents'));
 
+                    Utils.showLoading();
                     try {
-                        await ApiService.post('/api/transfers/external', {
-                            amount_cents: Math.round(amount * 100),
-                            recipient_name: formData.get('recipient_name'),
-                            recipient_account_number: formData.get('recipient_account_number'),
-                            routing_number: formData.get('routing_number'),
+                        await ApiService.post('/api/organizations', {
+                            name: formData.get('name'),
                             description: formData.get('description')
                         });
 
-                        Utils.showToast('External transfer completed successfully!', 'success');
+                        Utils.showToast('Organization created successfully!', 'success');
                         modal.remove();
-                        DashboardManager.loadDashboardData().then(() => DashboardManager.renderDashboard());
+                        await DashboardManager.loadDashboardData();
+                        if (AppState.currentView === 'organizations') {
+                            this.showOrganizations();
+                        } else {
+                            DashboardManager.renderDashboard();
+                        }
+                    } catch (error) {
+                        Utils.showToast(error.message, 'error');
+                    } finally {
+                        Utils.hideLoading();
+                    }
+                });
+            },
+
+            async showOrganizationDetails(orgId) {
+                Utils.showLoading();
+                try {
+                    const response = await ApiService.get(`/api/organizations/${orgId}`);
+                    this.renderOrganizationDetails(response.organization);
+                } catch (error) {
+                    Utils.showToast('Failed to load organization details', 'error');
+                    this.showOrganizations();
+                } finally {
+                    Utils.hideLoading();
+                }
+            },
+
+            renderOrganizationDetails(org) {
+                const isOwner = org.owner_id === AppState.user._id;
+                const isMember = org.members.some(member => member.user_id === AppState.user._id);
+
+                const orgDetailsHTML = `
+                    <div class="max-w-4xl mx-auto py-6 sm:px-6 lg:px-8 fade-in">
+                        <div class="px-4 py-6 sm:px-0">
+                            <!-- Header -->
+                            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <button onclick="OrganizationManager.showOrganizations()" 
+                                                class="flex items-center space-x-2 text-purple-600 hover:text-purple-700 transition-colors duration-200 mb-2">
+                                            <i class="fas fa-arrow-left"></i>
+                                            <span>Back to Organizations</span>
+                                        </button>
+                                        <h1 class="text-2xl font-bold text-gray-900">${org.name}</h1>
+                                        <p class="text-gray-600 mt-1">${org.description || 'No description'}</p>
+                                    </div>
+                                    <div class="flex items-center space-x-3">
+                                        ${isOwner ? `
+                                            <span class="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
+                                                Owner
+                                            </span>
+                                        ` : isMember ? `
+                                            <span class="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                                                Member
+                                            </span>
+                                        ` : `
+                                            <button onclick="OrganizationManager.joinOrganization('${org._id}')" 
+                                                    class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors duration-200">
+                                                Join Organization
+                                            </button>
+                                        `}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                <!-- Organization Info -->
+                                <div class="lg:col-span-2">
+                                    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Organization Information</h3>
+                                        <div class="space-y-4">
+                                            <div class="grid grid-cols-2 gap-4 text-sm">
+                                                <div>
+                                                    <span class="text-gray-600">Created:</span>
+                                                    <div class="font-semibold mt-1">${new Date(org.created_at).toLocaleDateString()}</div>
+                                                </div>
+                                                <div>
+                                                    <span class="text-gray-600">Members:</span>
+                                                    <div class="font-semibold mt-1">${org.members.length} people</div>
+                                                </div>
+                                                <div>
+                                                    <span class="text-gray-600">Status:</span>
+                                                    <div class="font-semibold mt-1 capitalize">${org.status}</div>
+                                                </div>
+                                                <div>
+                                                    <span class="text-gray-600">Visibility:</span>
+                                                    <div class="font-semibold mt-1 capitalize">${org.visibility}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Public Transactions (View Only) -->
+                                    <div class="bg-white rounded-lg shadow-sm border border-gray-200 mt-6">
+                                        <div class="px-6 py-4 border-b border-gray-200">
+                                            <h3 class="text-lg font-semibold text-gray-900">Recent Transactions</h3>
+                                            <p class="text-sm text-gray-500 mt-1">View-only access to organization transactions</p>
+                                        </div>
+                                        <div class="p-6">
+                                            <div class="text-center text-gray-500 py-8">
+                                                <i class="fas fa-eye text-3xl mb-3"></i>
+                                                <p>Transaction data is visible to organization members</p>
+                                                <p class="text-sm mt-1">You have view-only access to transaction history</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Members Section -->
+                                <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Organization Members</h3>
+                                    <div class="space-y-3">
+                                        ${org.members.map(member => `
+                                            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                                <div class="flex items-center space-x-3">
+                                                    <div class="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                                                        <i class="fas fa-user text-purple-600 text-sm"></i>
+                                                    </div>
+                                                    <div>
+                                                        <div class="font-medium text-sm">${member.name}</div>
+                                                        <div class="text-xs text-gray-500">${member.role}</div>
+                                                    </div>
+                                                </div>
+                                                ${member.user_id === org.owner_id ? `
+                                                    <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded">Owner</span>
+                                                ` : ''}
+                                            </div>
+                                        `).join('')}
+                                    </div>
+
+                                    ${isOwner ? `
+                                        <div class="mt-6 pt-4 border-t">
+                                            <button onclick="OrganizationManager.showInviteModal('${org._id}')" 
+                                                    class="w-full bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200">
+                                                Invite Members
+                                            </button>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                elements.mainContent.innerHTML = orgDetailsHTML;
+            },
+
+            async joinOrganization(orgId) {
+                Utils.showLoading();
+                try {
+                    await ApiService.post(`/api/organizations/${orgId}/join`);
+                    Utils.showToast('Successfully joined the organization!', 'success');
+                    await DashboardManager.loadDashboardData();
+                    this.showOrganizationDetails(orgId);
+                } catch (error) {
+                    Utils.showToast(error.message, 'error');
+                } finally {
+                    Utils.hideLoading();
+                }
+            },
+
+            showInviteModal(orgId) {
+                const modal = document.createElement('div');
+                modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in';
+                modal.innerHTML = `
+                    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h3 class="text-xl font-semibold text-gray-900">Invite Members</h3>
+                        </div>
+                        <div class="p-6">
+                            <p class="text-gray-600 mb-4">Share this code with people you want to invite:</p>
+                            <div class="bg-gray-100 p-4 rounded-lg text-center mb-4">
+                                <div class="font-mono text-lg font-bold">ORG-${orgId.slice(-8).toUpperCase()}</div>
+                                <p class="text-sm text-gray-500 mt-1">Share this code to invite members</p>
+                            </div>
+                            <button onclick="this.closest('.fixed').remove()" 
+                                    class="w-full bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200">
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                `;
+
+                document.body.appendChild(modal);
+            }
+        };
+
+        // Payment Management
+        const PaymentManager = {
+            showPaymentModal() {
+                const modal = document.createElement('div');
+                modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in';
+                modal.innerHTML = `
+                    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h3 class="text-xl font-semibold text-gray-900">Make a Payment</h3>
+                        </div>
+                        <form id="paymentForm" class="p-6 space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Card Number</label>
+                                <input type="text" required 
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent card-number-input"
+                                       placeholder="1234 5678 9012 3456">
+                                <div class="text-xs text-gray-500 mt-1 card-validation-message"></div>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Expiry Date</label>
+                                    <input type="text" required 
+                                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                           placeholder="MM/YY">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">CVV</label>
+                                    <input type="text" required 
+                                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                           placeholder="123">
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Amount (USD)</label>
+                                <input type="number" step="0.01" min="0.01" required 
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                       placeholder="0.00">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Merchant/Description</label>
+                                <input type="text" required
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                       placeholder="e.g., Amazon Purchase">
+                            </div>
+
+                            <div class="flex space-x-3 pt-4">
+                                <button type="button" onclick="this.closest('.fixed').remove()" 
+                                        class="flex-1 bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-colors duration-200 font-medium">
+                                    Cancel
+                                </button>
+                                <button type="submit" 
+                                        class="flex-1 bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
+                                    Process Payment
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                `;
+
+                document.body.appendChild(modal);
+
+                // Card number validation
+                const cardInput = modal.querySelector('.card-number-input');
+                const validationMessage = modal.querySelector('.card-validation-message');
+
+                cardInput.addEventListener('input', (e) => {
+                    const cardNumber = e.target.value.replace(/\s/g, '');
+                    if (cardNumber.length === 16) {
+                        if (Utils.validateCardNumber(cardNumber)) {
+                            validationMessage.textContent = '✓ Valid card number';
+                            validationMessage.className = 'text-xs text-green-600 mt-1';
+                        } else {
+                            validationMessage.textContent = '✗ Invalid card number';
+                            validationMessage.className = 'text-xs text-red-600 mt-1';
+                        }
+                    } else {
+                        validationMessage.textContent = '';
+                    }
+                });
+
+                modal.querySelector('#paymentForm').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.target);
+                    const cardNumber = formData.get('card_number').replace(/\s/g, '');
+                    const amount = parseFloat(formData.get('amount'));
+                    const description = formData.get('description');
+
+                    if (!Utils.validateCardNumber(cardNumber)) {
+                        Utils.showToast('Please enter a valid card number', 'error');
+                        return;
+                    }
+
+                    Utils.showLoading();
+                    try {
+                        await ApiService.post('/api/payments/process', {
+                            card_number: cardNumber,
+                            amount_cents: Math.round(amount * 100),
+                            description: description
+                        });
+
+                        Utils.showToast('Payment processed successfully!', 'success');
+                        modal.remove();
+                        await DashboardManager.loadDashboardData();
+                        DashboardManager.renderDashboard();
+                    } catch (error) {
+                        Utils.showToast(error.message, 'error');
+                    } finally {
+                        Utils.hideLoading();
+                    }
+                });
+            }
+        };
+
+        // Transfer Management
+        const TransferManager = {
+            showExternalTransferModal() {
+                // ... existing code ...
+            },
+
+            showCardToBankTransferModal() {
+                const modal = document.createElement('div');
+                modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 fade-in';
+                modal.innerHTML = `
+                    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full slide-up">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h3 class="text-xl font-semibold text-gray-900">Transfer from Card to Bank</h3>
+                        </div>
+                        <form id="cardToBankForm" class="p-6 space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Select Card</label>
+                                <select required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    <option value="">Choose a card</option>
+                                    ${AppState.cards.map(card => `
+                                        <option value="${card._id}">${Utils.maskCardNumber(card.card_number)} - Balance: ${Utils.formatCurrency(card.balance_cents)}</option>
+                                    `).join('')}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Bank Account Number</label>
+                                <input type="text" required 
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                       placeholder="Enter account number">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Routing Number</label>
+                                <input type="text" required 
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                       placeholder="Enter routing number">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Amount (USD)</label>
+                                <input type="number" step="0.01" min="0.01" required 
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                       placeholder="0.00">
+                            </div>
+
+                            <div class="flex space-x-3 pt-4">
+                                <button type="button" onclick="this.closest('.fixed').remove()" 
+                                        class="flex-1 bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-colors duration-200 font-medium">
+                                    Cancel
+                                </button>
+                                <button type="submit" 
+                                        class="flex-1 bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors duration-200 font-medium">
+                                    Transfer
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                `;
+
+                document.body.appendChild(modal);
+
+                modal.querySelector('#cardToBankForm').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.target);
+                    const cardId = formData.get('card_id');
+                    const amount = parseFloat(formData.get('amount'));
+                    const accountNumber = formData.get('account_number');
+                    const routingNumber = formData.get('routing_number');
+
+                    Utils.showLoading();
+                    try {
+                        await ApiService.post('/api/cards/transfer-to-bank', {
+                            card_id: cardId,
+                            account_number: accountNumber,
+                            routing_number: routingNumber,
+                            amount_cents: Math.round(amount * 100)
+                        });
+
+                        Utils.showToast('Transfer to bank completed successfully!', 'success');
+                        modal.remove();
+                        await DashboardManager.loadDashboardData();
+                        DashboardManager.renderDashboard();
                     } catch (error) {
                         Utils.showToast(error.message, 'error');
                     } finally {
@@ -1942,6 +2268,8 @@
         window.DashboardManager = DashboardManager;
         window.CardManager = CardManager;
         window.ProfileManager = ProfileManager;
+        window.OrganizationManager = OrganizationManager;
+        window.PaymentManager = PaymentManager;
         window.TransferManager = TransferManager;
     </script>
 </body>
