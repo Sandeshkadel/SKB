@@ -14,9 +14,9 @@
     "socket.io": "^4.7.5",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "firebase-admin": "^12.1.1"
+    "firebase-admin": "^12.1.0"
   },
-  "keywords": ["banking", "finance", "virtual-cards", "payments"],
-  "author": "Sandesh kadel",
+  "keywords": ["banking", "finance", "virtual-cards", "payments", "firebase"],
+  "author": "Your Name",
   "license": "MIT"
 }
