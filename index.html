@@ -388,11 +388,11 @@
                             AppState.loginData = data;
                             this.renderOTPScreen();
                         } else {
-                            // Signup flow
+                            // Signup flow - FIXED: Now properly calls renderOTPScreen
                             const data = await ApiService.post('/api/auth/signup', { email, name, phone });
                             AppState.loginData = data;
                             Utils.showToast('OTP sent to your email!', 'success');
-                            this.renderOTPScreen();
+                            this.renderOTPScreen(); // FIXED: This line was added
                         }
                     } catch (error) {
                         Utils.showToast(error.message, 'error');
