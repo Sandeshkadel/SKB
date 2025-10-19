@@ -298,6 +298,8 @@ const initializeDemoData = () => {
           joined_at: new Date()
         }
       ],
+      cards: [],
+      pending_requests: [],
       visibility: 'public',
       status: 'active',
       created_at: new Date()
@@ -318,6 +320,8 @@ const initializeDemoData = () => {
           joined_at: new Date()
         }
       ],
+      cards: [],
+      pending_requests: [],
       visibility: 'public',
       status: 'active',
       created_at: new Date()
@@ -1446,6 +1450,8 @@ app.post('/api/organizations', authenticateToken, (req, res) => {
           joined_at: new Date()
         }
       ],
+      cards: [],
+      pending_requests: [],
       visibility: 'public',
       status: 'active',
       created_at: new Date()
@@ -1461,6 +1467,8 @@ app.post('/api/organizations', authenticateToken, (req, res) => {
         description: organization.description,
         owner_id: organization.owner_id,
         members: organization.members,
+        cards: organization.cards,
+        pending_requests: organization.pending_requests,
         visibility: organization.visibility,
         status: organization.status,
         created_at: organization.created_at
@@ -1488,6 +1496,8 @@ app.get('/api/organizations/:orgId', authenticateToken, (req, res) => {
         description: organization.description,
         owner_id: organization.owner_id,
         members: organization.members,
+        cards: organization.cards,
+        pending_requests: organization.pending_requests,
         visibility: organization.visibility,
         status: organization.status,
         created_at: organization.created_at
@@ -1539,6 +1549,338 @@ app.post('/api/organizations/:orgId/join', authenticateToken, (req, res) => {
   }
 });
 
+// Request to join organization (requires approval)
+app.post('/api/organizations/:orgId/request-join', authenticateToken, (req, res) => {
+  try {
+    const organization = organizations.get(req.params.orgId);
+
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Check if user is already a member
+    const isMember = organization.members.some(member => member.user_id === req.user._id);
+    if (isMember) {
+      return res.status(400).json({ error: 'Already a member of this organization' });
+    }
+
+    // Check if user already has a pending request
+    const hasPendingRequest = organization.pending_requests.some(request => request.user_id === req.user._id);
+    if (hasPendingRequest) {
+      return res.status(400).json({ error: 'Already have a pending join request' });
+    }
+
+    // Add to pending requests
+    organization.pending_requests.push({
+      user_id: req.user._id,
+      user_name: req.user.name,
+      user_email: req.user.email,
+      requested_at: new Date()
+    });
+
+    organizations.set(organization._id, organization);
+
+    res.json({
+      message: 'Join request sent successfully. Waiting for owner approval.',
+      organization: {
+        _id: organization._id,
+        name: organization.name
+      }
+    });
+
+  } catch (error) {
+    console.error('Request join error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Approve join request
+app.post('/api/organizations/:orgId/approve-request', authenticateToken, (req, res) => {
+  try {
+    const { user_id } = req.body;
+    const organization = organizations.get(req.params.orgId);
+
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Check if user is owner
+    if (organization.owner_id !== req.user._id) {
+      return res.status(403).json({ error: 'Only organization owner can approve join requests' });
+    }
+
+    // Find the pending request
+    const requestIndex = organization.pending_requests.findIndex(request => request.user_id === user_id);
+    if (requestIndex === -1) {
+      return res.status(404).json({ error: 'Join request not found' });
+    }
+
+    const request = organization.pending_requests[requestIndex];
+    
+    // Remove from pending requests
+    organization.pending_requests.splice(requestIndex, 1);
+    
+    // Add user as member
+    organization.members.push({
+      user_id: user_id,
+      name: request.user_name,
+      role: 'member',
+      joined_at: new Date()
+    });
+
+    organizations.set(organization._id, organization);
+
+    res.json({
+      message: 'Join request approved successfully',
+      organization: {
+        _id: organization._id,
+        name: organization.name,
+        members: organization.members
+      }
+    });
+
+  } catch (error) {
+    console.error('Approve join request error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Reject join request
+app.post('/api/organizations/:orgId/reject-request', authenticateToken, (req, res) => {
+  try {
+    const { user_id } = req.body;
+    const organization = organizations.get(req.params.orgId);
+
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Check if user is owner
+    if (organization.owner_id !== req.user._id) {
+      return res.status(403).json({ error: 'Only organization owner can reject join requests' });
+    }
+
+    // Find the pending request
+    const requestIndex = organization.pending_requests.findIndex(request => request.user_id === user_id);
+    if (requestIndex === -1) {
+      return res.status(404).json({ error: 'Join request not found' });
+    }
+
+    // Remove from pending requests
+    organization.pending_requests.splice(requestIndex, 1);
+
+    organizations.set(organization._id, organization);
+
+    res.json({
+      message: 'Join request rejected successfully',
+      organization: {
+        _id: organization._id,
+        name: organization.name
+      }
+    });
+
+  } catch (error) {
+    console.error('Reject join request error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Change member role
+app.put('/api/organizations/:orgId/member-role', authenticateToken, (req, res) => {
+  try {
+    const { user_id, new_role } = req.body;
+    const organization = organizations.get(req.params.orgId);
+
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Check if user is owner
+    if (organization.owner_id !== req.user._id) {
+      return res.status(403).json({ error: 'Only organization owner can change member roles' });
+    }
+
+    // Find the member
+    const member = organization.members.find(member => member.user_id === user_id);
+    if (!member) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    // Cannot change owner role
+    if (member.user_id === organization.owner_id) {
+      return res.status(400).json({ error: 'Cannot change owner role' });
+    }
+
+    // Update role
+    member.role = new_role;
+
+    organizations.set(organization._id, organization);
+
+    res.json({
+      message: 'Member role updated successfully',
+      organization: {
+        _id: organization._id,
+        name: organization.name,
+        members: organization.members
+      }
+    });
+
+  } catch (error) {
+    console.error('Change member role error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Remove member from organization
+app.delete('/api/organizations/:orgId/members/:userId', authenticateToken, (req, res) => {
+  try {
+    const organization = organizations.get(req.params.orgId);
+
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Check if user is owner
+    if (organization.owner_id !== req.user._id) {
+      return res.status(403).json({ error: 'Only organization owner can remove members' });
+    }
+
+    // Cannot remove owner
+    if (req.params.userId === organization.owner_id) {
+      return res.status(400).json({ error: 'Cannot remove organization owner' });
+    }
+
+    // Find and remove member
+    const memberIndex = organization.members.findIndex(member => member.user_id === req.params.userId);
+    if (memberIndex === -1) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    organization.members.splice(memberIndex, 1);
+
+    organizations.set(organization._id, organization);
+
+    res.json({
+      message: 'Member removed successfully',
+      organization: {
+        _id: organization._id,
+        name: organization.name,
+        members: organization.members
+      }
+    });
+
+  } catch (error) {
+    console.error('Remove member error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create organization card
+app.post('/api/organizations/:orgId/cards', authenticateToken, (req, res) => {
+  try {
+    const organization = organizations.get(req.params.orgId);
+
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Check if user is owner or manager
+    const member = organization.members.find(member => member.user_id === req.user._id);
+    if (!member || (member.role !== 'owner' && member.role !== 'manager')) {
+      return res.status(403).json({ error: 'Only organization owners and managers can create cards' });
+    }
+
+    const cardNumber = generateValidCardNumber();
+    const currentYear = new Date().getFullYear();
+    const cardId = 'org_card_' + Date.now();
+    
+    const card = {
+      _id: cardId,
+      organization_id: organization._id,
+      card_number: cardNumber,
+      last4: cardNumber.slice(-4),
+      expiry_month: Math.floor(Math.random() * 12) + 1,
+      expiry_year: currentYear + 3,
+      cvv: generateCVV(),
+      brand: 'Visa',
+      status: 'active',
+      balance_cents: 0,
+      card_owner: organization.name,
+      card_type: 'virtual',
+      card_network: 'visa',
+      created_by: req.user._id,
+      created_at: new Date()
+    };
+
+    // Add card to organization
+    organization.cards.push(card);
+    organizations.set(organization._id, organization);
+
+    res.json({
+      message: 'Organization card created successfully',
+      card: {
+        _id: card._id,
+        card_number: card.card_number,
+        last4: card.last4,
+        expiry_month: card.expiry_month,
+        expiry_year: card.expiry_year,
+        cvv: card.cvv,
+        brand: card.brand,
+        status: card.status,
+        balance_cents: card.balance_cents,
+        card_owner: card.card_owner,
+        card_type: card.card_type,
+        card_network: card.card_network
+      }
+    });
+
+  } catch (error) {
+    console.error('Create organization card error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Delete organization card
+app.delete('/api/organizations/:orgId/cards/:cardId', authenticateToken, (req, res) => {
+  try {
+    const organization = organizations.get(req.params.orgId);
+
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Check if user is owner or manager
+    const member = organization.members.find(member => member.user_id === req.user._id);
+    if (!member || (member.role !== 'owner' && member.role !== 'manager')) {
+      return res.status(403).json({ error: 'Only organization owners and managers can delete cards' });
+    }
+
+    // Find the card
+    const cardIndex = organization.cards.findIndex(card => card._id === req.params.cardId);
+    if (cardIndex === -1) {
+      return res.status(404).json({ error: 'Organization card not found' });
+    }
+
+    // Remove card from organization
+    organization.cards.splice(cardIndex, 1);
+
+    organizations.set(organization._id, organization);
+
+    res.json({
+      message: 'Organization card deleted successfully',
+      organization: {
+        _id: organization._id,
+        name: organization.name,
+        cards: organization.cards
+      }
+    });
+
+  } catch (error) {
+    console.error('Delete organization card error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Payment processing
 app.post('/api/payments/process', authenticateToken, (req, res) => {
   try {
@@ -1563,7 +1905,7 @@ app.post('/api/payments/process', authenticateToken, (req, res) => {
     }
 
     // Validate card using Luhn algorithm
-    if (!Utils.validateCardNumber(card_number)) {
+    if (!validateCardNumber(card_number)) {
       return res.status(400).json({ error: 'Invalid card number' });
     }
 
@@ -1713,30 +2055,28 @@ app.post('/api/demo/reset', (req, res) => {
 });
 
 // Utility functions for validation
-const Utils = {
-  validateCardNumber(cardNumber) {
-    // Luhn algorithm validation
-    if (!/^\d+$/.test(cardNumber) || cardNumber.length < 13 || cardNumber.length > 19) {
-      return false;
-    }
-
-    let sum = 0;
-    let isEven = false;
-    
-    for (let i = cardNumber.length - 1; i >= 0; i--) {
-      let digit = parseInt(cardNumber[i]);
-      
-      if (isEven) {
-        digit *= 2;
-        if (digit > 9) digit -= 9;
-      }
-      
-      sum += digit;
-      isEven = !isEven;
-    }
-    
-    return sum % 10 === 0;
+const validateCardNumber = (cardNumber) => {
+  // Luhn algorithm validation
+  if (!/^\d+$/.test(cardNumber) || cardNumber.length < 13 || cardNumber.length > 19) {
+    return false;
   }
+
+  let sum = 0;
+  let isEven = false;
+  
+  for (let i = cardNumber.length - 1; i >= 0; i--) {
+    let digit = parseInt(cardNumber[i]);
+    
+    if (isEven) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    
+    sum += digit;
+    isEven = !isEven;
+  }
+  
+  return sum % 10 === 0;
 };
 
 // Socket.IO authentication and events
@@ -1773,9 +2113,14 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('   - user2@hcb.com (Password: any OTP)');
   console.log('   - Or create new account with any email');
   console.log('\n🆕 New Features Added:');
-  console.log('   ✅ Card owner name editing');
-  console.log('   ✅ Improved authentication flow');
-  console.log('   ✅ Organization management');
-  console.log('   ✅ Card number validation');
-  console.log('   ✅ Card to bank transfers');
+  console.log('   ✅ Fixed deposit functionality');
+  console.log('   ✅ Fixed transfer functionality (HCB users and banks)');
+  console.log('   ✅ Fixed payment processing');
+  console.log('   ✅ Card add funds functionality');
+  console.log('   ✅ Card delete functionality');
+  console.log('   ✅ Card transactions viewing');
+  console.log('   ✅ Organization card management');
+  console.log('   ✅ Organization member management');
+  console.log('   ✅ Join request system with approval workflow');
+  console.log('   ✅ Role-based permissions (owner/manager/member)');
 });
