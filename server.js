@@ -764,10 +764,12 @@ app.post('/api/account/deposit', authenticateToken, (req, res) => {
   }
 });
 
+// FIXED TRANSFER ENDPOINT - Properly deduct from sender and add to recipient
 app.post('/api/account/transfer', authenticateToken, (req, res) => {
   try {
     const { amount_cents, recipient_email, description } = req.body;
     
+    // Find sender account
     let senderAccount = null;
     for (let acc of accounts.values()) {
       if (acc.user_id === req.user._id) {
@@ -794,6 +796,7 @@ app.post('/api/account/transfer', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'Recipient not found' });
     }
 
+    // Find recipient account
     let recipientAccount = null;
     for (let acc of accounts.values()) {
       if (acc.user_id === recipient._id) {
@@ -802,10 +805,17 @@ app.post('/api/account/transfer', authenticateToken, (req, res) => {
       }
     }
 
-    // Update balances
+    if (!recipientAccount) {
+      return res.status(400).json({ error: 'Recipient account not found' });
+    }
+
+    // CRITICAL FIX: Properly update balances
+    // Deduct from sender
     senderAccount.balance_cents -= amount_cents;
+    // Add to recipient
     recipientAccount.balance_cents += amount_cents;
 
+    // Save updated accounts
     accounts.set(senderAccount._id, senderAccount);
     accounts.set(recipientAccount._id, recipientAccount);
 
@@ -815,7 +825,7 @@ app.post('/api/account/transfer', authenticateToken, (req, res) => {
       _id: senderTransactionId,
       user_id: req.user._id,
       account_id: senderAccount._id,
-      amount_cents: -amount_cents,
+      amount_cents: -amount_cents, // Negative for sender
       currency: 'USD',
       type: 'transfer',
       description: description || `Transfer to ${recipient_email}`,
@@ -830,7 +840,7 @@ app.post('/api/account/transfer', authenticateToken, (req, res) => {
       _id: recipientTransactionId,
       user_id: recipient._id,
       account_id: recipientAccount._id,
-      amount_cents: amount_cents,
+      amount_cents: amount_cents, // Positive for recipient
       currency: 'USD',
       type: 'transfer',
       description: description || `Transfer from ${req.user.email}`,
@@ -843,7 +853,7 @@ app.post('/api/account/transfer', authenticateToken, (req, res) => {
     transactions.set(senderTransactionId, senderTransaction);
     transactions.set(recipientTransactionId, recipientTransaction);
 
-    // Emit balance updates
+    // Emit balance updates to both users
     io.emit('balance_update', {
       user_id: req.user._id,
       balance_cents: senderAccount.balance_cents
