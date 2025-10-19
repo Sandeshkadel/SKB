@@ -64,6 +64,7 @@ const users = new Map();
 const accounts = new Map();
 const transactions = new Map();
 const cards = new Map();
+const organizations = new Map();
 const otps = new Map();
 const sessions = new Map();
 
@@ -276,7 +277,54 @@ const initializeDemoData = () => {
     };
     accounts.set(demoAccountId2, demoAccount2);
 
-    console.log('✅ Demo users created: demo@hcb.com & user2@hcb.com');
+    // Create demo organizations
+    const orgId1 = 'org_demo1';
+    const demoOrg1 = {
+      _id: orgId1,
+      name: 'Tech Startup Inc.',
+      description: 'A technology startup company',
+      owner_id: demoUserId1,
+      members: [
+        {
+          user_id: demoUserId1,
+          name: 'Demo User',
+          role: 'owner',
+          joined_at: new Date()
+        },
+        {
+          user_id: demoUserId2,
+          name: 'Test User',
+          role: 'member',
+          joined_at: new Date()
+        }
+      ],
+      visibility: 'public',
+      status: 'active',
+      created_at: new Date()
+    };
+    organizations.set(orgId1, demoOrg1);
+
+    const orgId2 = 'org_demo2';
+    const demoOrg2 = {
+      _id: orgId2,
+      name: 'Open Source Project',
+      description: 'Community open source project',
+      owner_id: demoUserId2,
+      members: [
+        {
+          user_id: demoUserId2,
+          name: 'Test User',
+          role: 'owner',
+          joined_at: new Date()
+        }
+      ],
+      visibility: 'public',
+      status: 'active',
+      created_at: new Date()
+    };
+    organizations.set(orgId2, demoOrg2);
+
+    console.log('✅ Demo users and organizations created');
   }
 };
 
@@ -605,6 +653,14 @@ app.get('/api/profile', authenticateToken, (req, res) => {
         break;
       }
     }
+
+    // Get user's organizations
+    const userOrganizations = [];
+    for (let org of organizations.values()) {
+      if (org.members.some(member => member.user_id === req.user._id)) {
+        userOrganizations.push(org);
+      }
+    }
     
     res.json({
       user: {
@@ -622,7 +678,8 @@ app.get('/api/profile', authenticateToken, (req, res) => {
         routing_number: account.routing_number,
         balance_cents: account.balance_cents,
         currency: account.currency
-      }
+      },
+      organizations: userOrganizations
     });
   } catch (error) {
     console.error('Profile error:', error);
@@ -632,11 +689,12 @@ app.get('/api/profile', authenticateToken, (req, res) => {
 
 app.put('/api/profile', authenticateToken, (req, res) => {
   try {
-    const { name, phone } = req.body;
+    const { name, phone, organization_id } = req.body;
 
     const user = users.get(req.user._id);
     if (name) user.name = name;
     if (phone) user.phone = phone;
+    if (organization_id) user.organization_id = organization_id;
     
     users.set(req.user._id, user);
 
@@ -648,7 +706,8 @@ app.put('/api/profile', authenticateToken, (req, res) => {
         phone: user.phone,
         profile_picture: user.profile_picture,
         email_verified: user.email_verified,
-        kyc_status: user.kyc_status
+        kyc_status: user.kyc_status,
+        organization_id: user.organization_id
       }
     });
   } catch (error) {
@@ -919,6 +978,7 @@ app.post('/api/cards', authenticateToken, (req, res) => {
       brand: 'Visa',
       status: 'active',
       balance_cents: 0,
+      card_owner: req.user.name, // Set initial card owner to user's name
       billing_address: {
         street: '123 Main St',
         city: 'New York',
@@ -946,6 +1006,7 @@ app.post('/api/cards', authenticateToken, (req, res) => {
         brand: card.brand,
         status: card.status,
         balance_cents: card.balance_cents,
+        card_owner: card.card_owner,
         billing_address: card.billing_address,
         phone_number: card.phone_number,
         card_type: card.card_type,
@@ -992,6 +1053,7 @@ app.get('/api/cards/:cardId', authenticateToken, (req, res) => {
         brand: card.brand,
         status: card.status,
         balance_cents: card.balance_cents,
+        card_owner: card.card_owner,
         billing_address: card.billing_address,
         phone_number: card.phone_number,
         card_type: card.card_type,
@@ -1003,6 +1065,35 @@ app.get('/api/cards/:cardId', authenticateToken, (req, res) => {
 
   } catch (error) {
     console.error('Card details error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update card owner name
+app.put('/api/cards/:cardId', authenticateToken, (req, res) => {
+  try {
+    const { card_owner } = req.body;
+    const card = cards.get(req.params.cardId);
+
+    if (!card || card.user_id !== req.user._id) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    // Update card owner
+    card.card_owner = card_owner;
+    cards.set(card._id, card);
+
+    res.json({
+      message: 'Card owner updated successfully',
+      card: {
+        _id: card._id,
+        card_owner: card.card_owner,
+        last4: card.last4
+      }
+    });
+
+  } catch (error) {
+    console.error('Update card owner error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1184,6 +1275,64 @@ app.post('/api/cards/transfer', authenticateToken, (req, res) => {
   }
 });
 
+// Transfer from card to bank account
+app.post('/api/cards/transfer-to-bank', authenticateToken, (req, res) => {
+  try {
+    const { card_id, account_number, routing_number, amount_cents, description } = req.body;
+
+    // Find source card
+    const card = cards.get(card_id);
+    if (!card || card.user_id !== req.user._id) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    // Check card balance
+    if (card.balance_cents < amount_cents) {
+      return res.status(400).json({ error: 'Insufficient card balance' });
+    }
+
+    // Validate bank details
+    if (!account_number || account_number.length < 5) {
+      return res.status(400).json({ error: 'Invalid account number' });
+    }
+
+    if (!routing_number || routing_number.length !== 9) {
+      return res.status(400).json({ error: 'Invalid routing number' });
+    }
+
+    // Transfer funds from card to bank (simulate)
+    card.balance_cents -= amount_cents;
+    cards.set(card._id, card);
+
+    // Create transaction
+    const transactionId = 'txn_' + Date.now();
+    const transaction = {
+      _id: transactionId,
+      user_id: req.user._id,
+      card_id: card_id,
+      amount_cents: -amount_cents,
+      currency: 'USD',
+      type: 'card_to_bank_transfer',
+      description: description || `Transfer to bank account ${account_number.slice(-4)}`,
+      status: 'completed',
+      counterparty_account: account_number.slice(-4),
+      created_at: new Date()
+    };
+
+    transactions.set(transactionId, transaction);
+
+    res.json({
+      message: 'Transfer to bank account successful',
+      card_balance: card.balance_cents,
+      amount_transferred: amount_cents
+    });
+
+  } catch (error) {
+    console.error('Card to bank transfer error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Delete card endpoint
 app.delete('/api/cards/:cardId', authenticateToken, (req, res) => {
   try {
@@ -1243,6 +1392,214 @@ app.delete('/api/cards/:cardId', authenticateToken, (req, res) => {
 
   } catch (error) {
     console.error('Delete card error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Organization Routes
+app.get('/api/organizations', authenticateToken, (req, res) => {
+  try {
+    const userOrganizations = [];
+    for (let org of organizations.values()) {
+      if (org.members.some(member => member.user_id === req.user._id)) {
+        userOrganizations.push(org);
+      }
+    }
+
+    res.json({
+      organizations: userOrganizations
+    });
+  } catch (error) {
+    console.error('Organizations error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/organizations/all', authenticateToken, (req, res) => {
+  try {
+    const allOrganizations = Array.from(organizations.values());
+    
+    res.json({
+      organizations: allOrganizations
+    });
+  } catch (error) {
+    console.error('All organizations error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/organizations', authenticateToken, (req, res) => {
+  try {
+    const { name, description } = req.body;
+
+    const orgId = 'org_' + Date.now();
+    const organization = {
+      _id: orgId,
+      name,
+      description,
+      owner_id: req.user._id,
+      members: [
+        {
+          user_id: req.user._id,
+          name: req.user.name,
+          role: 'owner',
+          joined_at: new Date()
+        }
+      ],
+      visibility: 'public',
+      status: 'active',
+      created_at: new Date()
+    };
+
+    organizations.set(orgId, organization);
+
+    res.json({
+      message: 'Organization created successfully',
+      organization: {
+        _id: organization._id,
+        name: organization.name,
+        description: organization.description,
+        owner_id: organization.owner_id,
+        members: organization.members,
+        visibility: organization.visibility,
+        status: organization.status,
+        created_at: organization.created_at
+      }
+    });
+
+  } catch (error) {
+    console.error('Create organization error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/organizations/:orgId', authenticateToken, (req, res) => {
+  try {
+    const organization = organizations.get(req.params.orgId);
+
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    res.json({
+      organization: {
+        _id: organization._id,
+        name: organization.name,
+        description: organization.description,
+        owner_id: organization.owner_id,
+        members: organization.members,
+        visibility: organization.visibility,
+        status: organization.status,
+        created_at: organization.created_at
+      }
+    });
+
+  } catch (error) {
+    console.error('Organization details error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/organizations/:orgId/join', authenticateToken, (req, res) => {
+  try {
+    const organization = organizations.get(req.params.orgId);
+
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    // Check if user is already a member
+    const isMember = organization.members.some(member => member.user_id === req.user._id);
+    if (isMember) {
+      return res.status(400).json({ error: 'Already a member of this organization' });
+    }
+
+    // Add user as member
+    organization.members.push({
+      user_id: req.user._id,
+      name: req.user.name,
+      role: 'member',
+      joined_at: new Date()
+    });
+
+    organizations.set(organization._id, organization);
+
+    res.json({
+      message: 'Successfully joined the organization',
+      organization: {
+        _id: organization._id,
+        name: organization.name,
+        members: organization.members
+      }
+    });
+
+  } catch (error) {
+    console.error('Join organization error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Payment processing
+app.post('/api/payments/process', authenticateToken, (req, res) => {
+  try {
+    const { card_number, amount_cents, description } = req.body;
+
+    // Find card
+    let card = null;
+    for (let c of cards.values()) {
+      if (c.card_number === card_number && c.user_id === req.user._id) {
+        card = c;
+        break;
+      }
+    }
+
+    if (!card) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    // Check card balance
+    if (card.balance_cents < amount_cents) {
+      return res.status(400).json({ error: 'Insufficient card balance' });
+    }
+
+    // Validate card using Luhn algorithm
+    if (!Utils.validateCardNumber(card_number)) {
+      return res.status(400).json({ error: 'Invalid card number' });
+    }
+
+    // Process payment
+    card.balance_cents -= amount_cents;
+    cards.set(card._id, card);
+
+    // Create transaction
+    const transactionId = 'txn_' + Date.now();
+    const transaction = {
+      _id: transactionId,
+      user_id: req.user._id,
+      card_id: card._id,
+      amount_cents: -amount_cents,
+      currency: 'USD',
+      type: 'payment',
+      description: description || 'Card payment',
+      status: 'completed',
+      created_at: new Date()
+    };
+
+    transactions.set(transactionId, transaction);
+
+    res.json({
+      message: 'Payment processed successfully',
+      transaction: {
+        _id: transaction._id,
+        amount_cents: transaction.amount_cents,
+        description: transaction.description,
+        status: transaction.status
+      },
+      card_balance: card.balance_cents
+    });
+
+  } catch (error) {
+    console.error('Payment processing error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1341,6 +1698,7 @@ app.post('/api/demo/reset', (req, res) => {
     accounts.clear();
     transactions.clear();
     cards.clear();
+    organizations.clear();
     otps.clear();
     sessions.clear();
     
@@ -1353,6 +1711,33 @@ app.post('/api/demo/reset', (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Utility functions for validation
+const Utils = {
+  validateCardNumber(cardNumber) {
+    // Luhn algorithm validation
+    if (!/^\d+$/.test(cardNumber) || cardNumber.length < 13 || cardNumber.length > 19) {
+      return false;
+    }
+
+    let sum = 0;
+    let isEven = false;
+    
+    for (let i = cardNumber.length - 1; i >= 0; i--) {
+      let digit = parseInt(cardNumber[i]);
+      
+      if (isEven) {
+        digit *= 2;
+        if (digit > 9) digit -= 9;
+      }
+      
+      sum += digit;
+      isEven = !isEven;
+    }
+    
+    return sum % 10 === 0;
+  }
+};
 
 // Socket.IO authentication and events
 io.on('connection', (socket) => {
@@ -1387,4 +1772,10 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('   - demo@hcb.com (Password: any OTP)');
   console.log('   - user2@hcb.com (Password: any OTP)');
   console.log('   - Or create new account with any email');
+  console.log('\n🆕 New Features Added:');
+  console.log('   ✅ Card owner name editing');
+  console.log('   ✅ Improved authentication flow');
+  console.log('   ✅ Organization management');
+  console.log('   ✅ Card number validation');
+  console.log('   ✅ Card to bank transfers');
 });
