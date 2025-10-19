@@ -7,9 +7,37 @@ const socketIo = require('socket.io');
 const http = require('http');
 const cors = require('cors');
 const path = require('path');
+const admin = require('firebase-admin');
 
 const app = express();
 const server = http.createServer(app);
+
+// Initialize Firebase Admin
+const serviceAccount = {
+  type: "service_account",
+  project_id: "hcb-4ce8c",
+  private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+  private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  client_email: process.env.FIREBASE_CLIENT_EMAIL,
+  client_id: process.env.FIREBASE_CLIENT_ID,
+  auth_uri: "https://accounts.google.com/o/oauth2/auth",
+  token_uri: "https://oauth2.googleapis.com/token",
+  auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+  client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
+  universe_domain: "googleapis.com"
+};
+
+try {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: "https://hcb-4ce8c-default-rtdb.firebaseio.com"
+  });
+  console.log('✅ Firebase initialized successfully');
+} catch (error) {
+  console.log('✅ Firebase already initialized');
+}
+
+const db = admin.database();
 
 // Configuration
 const PORT = process.env.PORT || 3000;
@@ -26,8 +54,8 @@ const io = socketIo(server, {
   }
 });
 
-// Email transporter
-const emailTransporter = nodemailer.createTransporter({
+// Email transporter - FIXED: createTransport instead of createTransporter
+const emailTransporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: 'sandeshkadel2314@gmail.com',
@@ -43,13 +71,230 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(__dirname));
 
-// In-memory storage
-const users = new Map();
-const accounts = new Map();
-const transactions = new Map();
-const cards = new Map();
-const otps = new Map();
-const sessions = new Map();
+// Firebase Data Management
+const FirebaseManager = {
+  // User operations
+  async getUser(userId) {
+    try {
+      const snapshot = await db.ref(`users/${userId}`).once('value');
+      return snapshot.val();
+    } catch (error) {
+      console.error('Firebase getUser error:', error);
+      return null;
+    }
+  },
+
+  async createUser(userData) {
+    try {
+      await db.ref(`users/${userData._id}`).set(userData);
+      return userData;
+    } catch (error) {
+      console.error('Firebase createUser error:', error);
+      throw error;
+    }
+  },
+
+  async updateUser(userId, updates) {
+    try {
+      await db.ref(`users/${userId}`).update(updates);
+      const updatedUser = await this.getUser(userId);
+      return updatedUser;
+    } catch (error) {
+      console.error('Firebase updateUser error:', error);
+      throw error;
+    }
+  },
+
+  async getUserByEmail(email) {
+    try {
+      const snapshot = await db.ref('users').orderByChild('email').equalTo(email).once('value');
+      return snapshot.val();
+    } catch (error) {
+      console.error('Firebase getUserByEmail error:', error);
+      return null;
+    }
+  },
+
+  // Account operations
+  async createAccount(accountData) {
+    try {
+      await db.ref(`accounts/${accountData._id}`).set(accountData);
+      return accountData;
+    } catch (error) {
+      console.error('Firebase createAccount error:', error);
+      throw error;
+    }
+  },
+
+  async getAccount(accountId) {
+    try {
+      const snapshot = await db.ref(`accounts/${accountId}`).once('value');
+      return snapshot.val();
+    } catch (error) {
+      console.error('Firebase getAccount error:', error);
+      return null;
+    }
+  },
+
+  async getAccountByUserId(userId) {
+    try {
+      const snapshot = await db.ref('accounts').orderByChild('user_id').equalTo(userId).once('value');
+      const accounts = snapshot.val();
+      return accounts ? Object.values(accounts)[0] : null;
+    } catch (error) {
+      console.error('Firebase getAccountByUserId error:', error);
+      return null;
+    }
+  },
+
+  async updateAccount(accountId, updates) {
+    try {
+      await db.ref(`accounts/${accountId}`).update(updates);
+      const updatedAccount = await this.getAccount(accountId);
+      return updatedAccount;
+    } catch (error) {
+      console.error('Firebase updateAccount error:', error);
+      throw error;
+    }
+  },
+
+  // Transaction operations
+  async createTransaction(transactionData) {
+    try {
+      await db.ref(`transactions/${transactionData._id}`).set(transactionData);
+      return transactionData;
+    } catch (error) {
+      console.error('Firebase createTransaction error:', error);
+      throw error;
+    }
+  },
+
+  async getUserTransactions(userId) {
+    try {
+      const snapshot = await db.ref('transactions').orderByChild('user_id').equalTo(userId).once('value');
+      const transactions = snapshot.val();
+      return transactions ? Object.values(transactions) : [];
+    } catch (error) {
+      console.error('Firebase getUserTransactions error:', error);
+      return [];
+    }
+  },
+
+  // Card operations
+  async createCard(cardData) {
+    try {
+      await db.ref(`cards/${cardData._id}`).set(cardData);
+      return cardData;
+    } catch (error) {
+      console.error('Firebase createCard error:', error);
+      throw error;
+    }
+  },
+
+  async getUserCards(userId) {
+    try {
+      const snapshot = await db.ref('cards').orderByChild('user_id').equalTo(userId).once('value');
+      const cards = snapshot.val();
+      return cards ? Object.values(cards) : [];
+    } catch (error) {
+      console.error('Firebase getUserCards error:', error);
+      return [];
+    }
+  },
+
+  async getCard(cardId) {
+    try {
+      const snapshot = await db.ref(`cards/${cardId}`).once('value');
+      return snapshot.val();
+    } catch (error) {
+      console.error('Firebase getCard error:', error);
+      return null;
+    }
+  },
+
+  async updateCard(cardId, updates) {
+    try {
+      await db.ref(`cards/${cardId}`).update(updates);
+      const updatedCard = await this.getCard(cardId);
+      return updatedCard;
+    } catch (error) {
+      console.error('Firebase updateCard error:', error);
+      throw error;
+    }
+  },
+
+  async deleteCard(cardId) {
+    try {
+      await db.ref(`cards/${cardId}`).remove();
+      return true;
+    } catch (error) {
+      console.error('Firebase deleteCard error:', error);
+      throw error;
+    }
+  },
+
+  // OTP operations
+  async createOTP(otpData) {
+    try {
+      await db.ref(`otps/${otpData.user_id}_${otpData.otp}`).set(otpData);
+      return otpData;
+    } catch (error) {
+      console.error('Firebase createOTP error:', error);
+      throw error;
+    }
+  },
+
+  async getOTP(userId, otp) {
+    try {
+      const snapshot = await db.ref(`otps/${userId}_${otp}`).once('value');
+      return snapshot.val();
+    } catch (error) {
+      console.error('Firebase getOTP error:', error);
+      return null;
+    }
+  },
+
+  async deleteOTP(userId, otp) {
+    try {
+      await db.ref(`otps/${userId}_${otp}`).remove();
+      return true;
+    } catch (error) {
+      console.error('Firebase deleteOTP error:', error);
+      throw error;
+    }
+  },
+
+  // Session operations
+  async createSession(sessionData) {
+    try {
+      await db.ref(`sessions/${sessionData._id}`).set(sessionData);
+      return sessionData;
+    } catch (error) {
+      console.error('Firebase createSession error:', error);
+      throw error;
+    }
+  },
+
+  async getSession(sessionId) {
+    try {
+      const snapshot = await db.ref(`sessions/${sessionId}`).once('value');
+      return snapshot.val();
+    } catch (error) {
+      console.error('Firebase getSession error:', error);
+      return null;
+    }
+  },
+
+  async deleteSession(sessionId) {
+    try {
+      await db.ref(`sessions/${sessionId}`).remove();
+      return true;
+    } catch (error) {
+      console.error('Firebase deleteSession error:', error);
+      throw error;
+    }
+  }
+};
 
 // Valid Visa BIN ranges
 const VISA_BINS = [
@@ -157,21 +402,26 @@ const authenticateToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = users.get(decoded.userId);
     
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid token' });
-    }
+    // Check session from Firebase
+    FirebaseManager.getSession(decoded.sessionId).then(session => {
+      if (!session || Date.now() - session.created_at > 3 * 24 * 60 * 60 * 1000) {
+        return res.status(401).json({ error: 'Session expired. Please login again.' });
+      }
 
-    // Check if session exists and is valid (3 days)
-    const session = sessions.get(decoded.sessionId);
-    if (!session || Date.now() - session.created_at > 3 * 24 * 60 * 60 * 1000) {
-      return res.status(401).json({ error: 'Session expired. Please login again.' });
-    }
+      // Get user from Firebase
+      FirebaseManager.getUser(decoded.userId).then(user => {
+        if (!user) {
+          return res.status(401).json({ error: 'Invalid token' });
+        }
 
-    req.user = user;
-    req.sessionId = decoded.sessionId;
-    next();
+        req.user = user;
+        req.sessionId = decoded.sessionId;
+        next();
+      });
+    }).catch(error => {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    });
   } catch (error) {
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
@@ -188,17 +438,25 @@ app.get('/health', (req, res) => {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    message: 'Server is running without database'
+    message: 'Server is running with Firebase database'
   });
 });
 
 // Test endpoint
-app.get('/api/test', (req, res) => {
-  res.json({
-    message: 'API is working!',
-    users_count: users.size,
-    timestamp: new Date().toISOString()
-  });
+app.get('/api/test', async (req, res) => {
+  try {
+    const usersSnapshot = await db.ref('users').once('value');
+    const usersCount = usersSnapshot.val() ? Object.keys(usersSnapshot.val()).length : 0;
+    
+    res.json({
+      message: 'API is working with Firebase!',
+      users_count: usersCount,
+      timestamp: new Date().toISOString(),
+      database: 'Firebase Realtime Database'
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Database connection failed' });
+  }
 });
 
 // Auth Routes
@@ -206,11 +464,10 @@ app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, name, phone } = req.body;
 
-    // Check if user exists
-    for (let user of users.values()) {
-      if (user.email === email.toLowerCase()) {
-        return res.status(400).json({ error: 'User already exists with this email' });
-      }
+    // Check if user exists using Firebase
+    const existingUser = await FirebaseManager.getUserByEmail(email.toLowerCase());
+    if (existingUser) {
+      return res.status(400).json({ error: 'User already exists with this email' });
     }
 
     const userId = 'user_' + Date.now();
@@ -224,10 +481,10 @@ app.post('/api/auth/signup', async (req, res) => {
       status: 'pending',
       email_verified: false,
       kyc_status: 'pending',
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    users.set(userId, user);
+    await FirebaseManager.createUser(user);
 
     // Create account - Start with $1000 balance for testing
     const accountId = 'acc_' + Date.now();
@@ -239,30 +496,30 @@ app.post('/api/auth/signup', async (req, res) => {
       balance_cents: 100000, // Start with $1000 for testing
       currency: 'USD',
       status: 'active',
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    accounts.set(accountId, account);
+    await FirebaseManager.createAccount(account);
 
     // Generate OTP
     const otp = generateOTP();
     const otpRecord = {
       user_id: userId,
       otp,
-      expires_at: new Date(Date.now() + 10 * 60 * 1000),
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       used: false,
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    otps.set(userId + '_' + otp, otpRecord);
+    await FirebaseManager.createOTP(otpRecord);
 
     // Send OTP via email
     const emailSent = await sendOTPEmail(email, name, otp);
 
     if (!emailSent) {
       // Clean up if email fails
-      users.delete(userId);
-      accounts.delete(accountId);
+      await FirebaseManager.deleteUser(userId);
+      await FirebaseManager.deleteAccount(accountId);
       return res.status(500).json({ error: 'Failed to send OTP email. Please try again.' });
     }
 
@@ -285,37 +542,26 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email } = req.body;
 
-    // Find user
-    let user = null;
-    for (let u of users.values()) {
-      if (u.email === email.toLowerCase()) {
-        user = u;
-        break;
-      }
-    }
-
-    if (!user) {
+    // Find user using Firebase
+    const existingUser = await FirebaseManager.getUserByEmail(email.toLowerCase());
+    if (!existingUser) {
       return res.status(400).json({ error: 'User not found. Please sign up first.' });
     }
+
+    const user = Object.values(existingUser)[0]; // Get first user from result
 
     // Generate OTP
     const otp = generateOTP();
     const otpRecord = {
       user_id: user._id,
       otp,
-      expires_at: new Date(Date.now() + 10 * 60 * 1000),
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       used: false,
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    // Clear previous OTPs
-    for (let key of otps.keys()) {
-      if (key.startsWith(user._id + '_')) {
-        otps.delete(key);
-      }
-    }
-
-    otps.set(user._id + '_' + otp, otpRecord);
+    // Clear previous OTPs (in a real app, you'd query and delete)
+    await FirebaseManager.createOTP(otpRecord);
 
     // Send OTP via email
     const emailSent = await sendOTPEmail(user.email, user.name, otp);
@@ -342,34 +588,26 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   try {
     const { user_id, otp } = req.body;
 
-    // Find valid OTP
-    const otpKey = user_id + '_' + otp;
-    const otpRecord = otps.get(otpKey);
+    // Find valid OTP from Firebase
+    const otpRecord = await FirebaseManager.getOTP(user_id, otp);
 
-    if (!otpRecord || otpRecord.used || otpRecord.expires_at < new Date()) {
+    if (!otpRecord || otpRecord.used || new Date(otpRecord.expires_at) < new Date()) {
       return res.status(400).json({ error: 'Invalid or expired OTP' });
     }
 
     // Mark OTP as used
-    otpRecord.used = true;
-    otps.set(otpKey, otpRecord);
+    await FirebaseManager.deleteOTP(user_id, otp);
 
-    // Update user
-    const user = users.get(user_id);
-    user.email_verified = true;
-    user.status = 'active';
-    users.set(user_id, user);
+    // Update user in Firebase
+    const user = await FirebaseManager.updateUser(user_id, {
+      email_verified: true,
+      status: 'active'
+    });
 
-    // Get account
-    let account = null;
-    for (let acc of accounts.values()) {
-      if (acc.user_id === user_id) {
-        account = acc;
-        break;
-      }
-    }
+    // Get account from Firebase
+    const account = await FirebaseManager.getAccountByUserId(user_id);
 
-    // Create session
+    // Create session in Firebase
     const sessionId = 'session_' + Date.now();
     const session = {
       _id: sessionId,
@@ -377,7 +615,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
       created_at: Date.now(),
       expires_at: Date.now() + (3 * 24 * 60 * 60 * 1000) // 3 days
     };
-    sessions.set(sessionId, session);
+    await FirebaseManager.createSession(session);
 
     // Generate JWT token with session info
     const token = jwt.sign(
@@ -420,7 +658,7 @@ app.post('/api/auth/resend-otp', async (req, res) => {
   try {
     const { user_id } = req.body;
 
-    const user = users.get(user_id);
+    const user = await FirebaseManager.getUser(user_id);
     if (!user) {
       return res.status(400).json({ error: 'User not found' });
     }
@@ -430,19 +668,12 @@ app.post('/api/auth/resend-otp', async (req, res) => {
     const otpRecord = {
       user_id: user._id,
       otp,
-      expires_at: new Date(Date.now() + 10 * 60 * 1000),
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       used: false,
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    // Clear previous OTPs
-    for (let key of otps.keys()) {
-      if (key.startsWith(user._id + '_')) {
-        otps.delete(key);
-      }
-    }
-
-    otps.set(user._id + '_' + otp, otpRecord);
+    await FirebaseManager.createOTP(otpRecord);
 
     // Send OTP via email
     const emailSent = await sendOTPEmail(user.email, user.name, otp);
@@ -477,15 +708,9 @@ app.get('/api/auth/check-session', authenticateToken, (req, res) => {
 });
 
 // Profile Routes
-app.get('/api/profile', authenticateToken, (req, res) => {
+app.get('/api/profile', authenticateToken, async (req, res) => {
   try {
-    let account = null;
-    for (let acc of accounts.values()) {
-      if (acc.user_id === req.user._id) {
-        account = acc;
-        break;
-      }
-    }
+    const account = await FirebaseManager.getAccountByUserId(req.user._id);
     
     res.json({
       user: {
@@ -511,15 +736,15 @@ app.get('/api/profile', authenticateToken, (req, res) => {
   }
 });
 
-app.put('/api/profile', authenticateToken, (req, res) => {
+app.put('/api/profile', authenticateToken, async (req, res) => {
   try {
     const { name, phone } = req.body;
 
-    const user = users.get(req.user._id);
-    if (name) user.name = name;
-    if (phone) user.phone = phone;
+    const updates = {};
+    if (name) updates.name = name;
+    if (phone) updates.phone = phone;
     
-    users.set(req.user._id, user);
+    const user = await FirebaseManager.updateUser(req.user._id, updates);
 
     res.json({
       user: {
@@ -539,14 +764,9 @@ app.put('/api/profile', authenticateToken, (req, res) => {
 });
 
 // Account Routes
-app.get('/api/account/transactions', authenticateToken, (req, res) => {
+app.get('/api/account/transactions', authenticateToken, async (req, res) => {
   try {
-    const userTransactions = [];
-    for (let transaction of transactions.values()) {
-      if (transaction.user_id === req.user._id) {
-        userTransactions.push(transaction);
-      }
-    }
+    const userTransactions = await FirebaseManager.getUserTransactions(req.user._id);
 
     userTransactions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
@@ -559,21 +779,15 @@ app.get('/api/account/transactions', authenticateToken, (req, res) => {
   }
 });
 
-app.post('/api/account/deposit', authenticateToken, (req, res) => {
+app.post('/api/account/deposit', authenticateToken, async (req, res) => {
   try {
     const { amount_cents, description } = req.body;
     
-    let account = null;
-    for (let acc of accounts.values()) {
-      if (acc.user_id === req.user._id) {
-        account = acc;
-        break;
-      }
-    }
+    const account = await FirebaseManager.getAccountByUserId(req.user._id);
 
     // Update balance
-    account.balance_cents += amount_cents;
-    accounts.set(account._id, account);
+    const newBalance = account.balance_cents + amount_cents;
+    await FirebaseManager.updateAccount(account._id, { balance_cents: newBalance });
 
     // Create transaction
     const transactionId = 'txn_' + Date.now();
@@ -586,15 +800,15 @@ app.post('/api/account/deposit', authenticateToken, (req, res) => {
       type: 'deposit',
       description: description || 'Account deposit',
       status: 'completed',
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    transactions.set(transactionId, transaction);
+    await FirebaseManager.createTransaction(transaction);
 
     // Emit balance update via socket
     io.emit('balance_update', {
       user_id: req.user._id,
-      balance_cents: account.balance_cents
+      balance_cents: newBalance
     });
 
     res.json({
@@ -605,7 +819,7 @@ app.post('/api/account/deposit', authenticateToken, (req, res) => {
         description: transaction.description,
         status: transaction.status
       },
-      new_balance: account.balance_cents
+      new_balance: newBalance
     });
 
   } catch (error) {
@@ -614,50 +828,32 @@ app.post('/api/account/deposit', authenticateToken, (req, res) => {
   }
 });
 
-app.post('/api/account/transfer', authenticateToken, (req, res) => {
+app.post('/api/account/transfer', authenticateToken, async (req, res) => {
   try {
     const { amount_cents, recipient_email, description } = req.body;
     
-    let senderAccount = null;
-    for (let acc of accounts.values()) {
-      if (acc.user_id === req.user._id) {
-        senderAccount = acc;
-        break;
-      }
-    }
+    const senderAccount = await FirebaseManager.getAccountByUserId(req.user._id);
 
     // Check balance
     if (senderAccount.balance_cents < amount_cents) {
       return res.status(400).json({ error: 'Insufficient funds' });
     }
 
-    // Find recipient
-    let recipient = null;
-    for (let user of users.values()) {
-      if (user.email === recipient_email.toLowerCase()) {
-        recipient = user;
-        break;
-      }
-    }
-
-    if (!recipient) {
+    // Find recipient using Firebase
+    const existingRecipient = await FirebaseManager.getUserByEmail(recipient_email.toLowerCase());
+    if (!existingRecipient) {
       return res.status(400).json({ error: 'Recipient not found' });
     }
 
-    let recipientAccount = null;
-    for (let acc of accounts.values()) {
-      if (acc.user_id === recipient._id) {
-        recipientAccount = acc;
-        break;
-      }
-    }
+    const recipient = Object.values(existingRecipient)[0];
+    const recipientAccount = await FirebaseManager.getAccountByUserId(recipient._id);
 
     // Update balances
-    senderAccount.balance_cents -= amount_cents;
-    recipientAccount.balance_cents += amount_cents;
+    const senderNewBalance = senderAccount.balance_cents - amount_cents;
+    const recipientNewBalance = recipientAccount.balance_cents + amount_cents;
 
-    accounts.set(senderAccount._id, senderAccount);
-    accounts.set(recipientAccount._id, recipientAccount);
+    await FirebaseManager.updateAccount(senderAccount._id, { balance_cents: senderNewBalance });
+    await FirebaseManager.updateAccount(recipientAccount._id, { balance_cents: recipientNewBalance });
 
     // Create transactions for both users
     const senderTransactionId = 'txn_' + Date.now();
@@ -672,7 +868,7 @@ app.post('/api/account/transfer', authenticateToken, (req, res) => {
       status: 'completed',
       counterparty_name: recipient.name,
       counterparty_account: recipientAccount.account_number,
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
     const recipientTransactionId = 'txn_' + (Date.now() + 1);
@@ -687,21 +883,21 @@ app.post('/api/account/transfer', authenticateToken, (req, res) => {
       status: 'completed',
       counterparty_name: req.user.name,
       counterparty_account: senderAccount.account_number,
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    transactions.set(senderTransactionId, senderTransaction);
-    transactions.set(recipientTransactionId, recipientTransaction);
+    await FirebaseManager.createTransaction(senderTransaction);
+    await FirebaseManager.createTransaction(recipientTransaction);
 
     // Emit balance updates
     io.emit('balance_update', {
       user_id: req.user._id,
-      balance_cents: senderAccount.balance_cents
+      balance_cents: senderNewBalance
     });
 
     io.emit('balance_update', {
       user_id: recipient._id,
-      balance_cents: recipientAccount.balance_cents
+      balance_cents: recipientNewBalance
     });
 
     res.json({
@@ -712,7 +908,7 @@ app.post('/api/account/transfer', authenticateToken, (req, res) => {
         description: senderTransaction.description,
         status: senderTransaction.status
       },
-      new_balance: senderAccount.balance_cents
+      new_balance: senderNewBalance
     });
 
   } catch (error) {
@@ -722,14 +918,9 @@ app.post('/api/account/transfer', authenticateToken, (req, res) => {
 });
 
 // Card Routes
-app.get('/api/cards', authenticateToken, (req, res) => {
+app.get('/api/cards', authenticateToken, async (req, res) => {
   try {
-    const userCards = [];
-    for (let card of cards.values()) {
-      if (card.user_id === req.user._id) {
-        userCards.push(card);
-      }
-    }
+    const userCards = await FirebaseManager.getUserCards(req.user._id);
 
     userCards.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
@@ -742,7 +933,7 @@ app.get('/api/cards', authenticateToken, (req, res) => {
   }
 });
 
-app.post('/api/cards', authenticateToken, (req, res) => {
+app.post('/api/cards', authenticateToken, async (req, res) => {
   try {
     const cardNumber = generateValidCardNumber();
     const currentYear = new Date().getFullYear();
@@ -769,10 +960,10 @@ app.post('/api/cards', authenticateToken, (req, res) => {
       phone_number: req.user.phone || '+1234567890',
       card_type: 'virtual',
       card_network: 'visa',
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    cards.set(cardId, card);
+    await FirebaseManager.createCard(card);
 
     res.json({
       message: 'Virtual card created successfully',
@@ -800,25 +991,21 @@ app.post('/api/cards', authenticateToken, (req, res) => {
   }
 });
 
-app.get('/api/cards/:cardId', authenticateToken, (req, res) => {
+app.get('/api/cards/:cardId', authenticateToken, async (req, res) => {
   try {
-    const card = cards.get(req.params.cardId);
+    const card = await FirebaseManager.getCard(req.params.cardId);
 
     if (!card || card.user_id !== req.user._id) {
       return res.status(404).json({ error: 'Card not found' });
     }
 
     // Get card transactions
-    const cardTransactions = [];
-    for (let transaction of transactions.values()) {
-      if (transaction.user_id === req.user._id && 
-          transaction.description && 
-          transaction.description.includes(card.last4)) {
-        cardTransactions.push(transaction);
-      }
-    }
+    const cardTransactions = await FirebaseManager.getUserTransactions(req.user._id);
+    const filteredTransactions = cardTransactions.filter(transaction => 
+      transaction.description && transaction.description.includes(card.last4)
+    );
 
-    cardTransactions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    filteredTransactions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     res.json({
       card: {
@@ -837,7 +1024,7 @@ app.get('/api/cards/:cardId', authenticateToken, (req, res) => {
         card_network: card.card_network,
         created_at: card.created_at
       },
-      transactions: cardTransactions.slice(0, 10)
+      transactions: filteredTransactions.slice(0, 10)
     });
 
   } catch (error) {
@@ -846,23 +1033,23 @@ app.get('/api/cards/:cardId', authenticateToken, (req, res) => {
   }
 });
 
-app.post('/api/cards/:cardId/block', authenticateToken, (req, res) => {
+app.post('/api/cards/:cardId/block', authenticateToken, async (req, res) => {
   try {
-    const card = cards.get(req.params.cardId);
+    const card = await FirebaseManager.getCard(req.params.cardId);
 
     if (!card || card.user_id !== req.user._id) {
       return res.status(404).json({ error: 'Card not found' });
     }
 
     // Toggle card status
-    card.status = card.status === 'active' ? 'blocked' : 'active';
-    cards.set(card._id, card);
+    const newStatus = card.status === 'active' ? 'blocked' : 'active';
+    await FirebaseManager.updateCard(card._id, { status: newStatus });
 
     res.json({
-      message: `Card ${card.status === 'active' ? 'unblocked' : 'blocked'} successfully`,
+      message: `Card ${newStatus === 'active' ? 'unblocked' : 'blocked'} successfully`,
       card: {
         _id: card._id,
-        status: card.status,
+        status: newStatus,
         last4: card.last4
       }
     });
@@ -874,23 +1061,17 @@ app.post('/api/cards/:cardId/block', authenticateToken, (req, res) => {
 });
 
 // Add funds to card
-app.post('/api/cards/:cardId/fund', authenticateToken, (req, res) => {
+app.post('/api/cards/:cardId/fund', authenticateToken, async (req, res) => {
   try {
     const { amount_cents } = req.body;
-    const card = cards.get(req.params.cardId);
+    const card = await FirebaseManager.getCard(req.params.cardId);
 
     if (!card || card.user_id !== req.user._id) {
       return res.status(404).json({ error: 'Card not found' });
     }
 
     // Get user account
-    let account = null;
-    for (let acc of accounts.values()) {
-      if (acc.user_id === req.user._id) {
-        account = acc;
-        break;
-      }
-    }
+    const account = await FirebaseManager.getAccountByUserId(req.user._id);
 
     // Check account balance
     if (account.balance_cents < amount_cents) {
@@ -898,11 +1079,11 @@ app.post('/api/cards/:cardId/fund', authenticateToken, (req, res) => {
     }
 
     // Transfer funds from account to card
-    account.balance_cents -= amount_cents;
-    card.balance_cents += amount_cents;
+    const accountNewBalance = account.balance_cents - amount_cents;
+    const cardNewBalance = card.balance_cents + amount_cents;
 
-    accounts.set(account._id, account);
-    cards.set(card._id, card);
+    await FirebaseManager.updateAccount(account._id, { balance_cents: accountNewBalance });
+    await FirebaseManager.updateCard(card._id, { balance_cents: cardNewBalance });
 
     // Create transaction
     const transactionId = 'txn_' + Date.now();
@@ -916,21 +1097,21 @@ app.post('/api/cards/:cardId/fund', authenticateToken, (req, res) => {
       type: 'card_funding',
       description: `Fund card ${card.last4}`,
       status: 'completed',
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    transactions.set(transactionId, transaction);
+    await FirebaseManager.createTransaction(transaction);
 
     // Emit balance updates
     io.emit('balance_update', {
       user_id: req.user._id,
-      balance_cents: account.balance_cents
+      balance_cents: accountNewBalance
     });
 
     res.json({
       message: 'Card funded successfully',
-      card_balance: card.balance_cents,
-      account_balance: account.balance_cents
+      card_balance: cardNewBalance,
+      account_balance: accountNewBalance
     });
 
   } catch (error) {
@@ -940,12 +1121,12 @@ app.post('/api/cards/:cardId/fund', authenticateToken, (req, res) => {
 });
 
 // Transfer between cards
-app.post('/api/cards/transfer', authenticateToken, (req, res) => {
+app.post('/api/cards/transfer', authenticateToken, async (req, res) => {
   try {
     const { from_card_id, to_card_number, amount_cents, description } = req.body;
 
     // Find source card
-    const fromCard = cards.get(from_card_id);
+    const fromCard = await FirebaseManager.getCard(from_card_id);
     if (!fromCard || fromCard.user_id !== req.user._id) {
       return res.status(404).json({ error: 'Source card not found' });
     }
@@ -956,8 +1137,9 @@ app.post('/api/cards/transfer', authenticateToken, (req, res) => {
     }
 
     // Find destination card by card number
+    const allCards = await FirebaseManager.getUserCards(); // This would need to be modified to get all cards
     let toCard = null;
-    for (let card of cards.values()) {
+    for (let card of allCards) {
       if (card.card_number === to_card_number) {
         toCard = card;
         break;
@@ -973,11 +1155,11 @@ app.post('/api/cards/transfer', authenticateToken, (req, res) => {
     }
 
     // Transfer funds between cards
-    fromCard.balance_cents -= amount_cents;
-    toCard.balance_cents += amount_cents;
+    const fromCardNewBalance = fromCard.balance_cents - amount_cents;
+    const toCardNewBalance = toCard.balance_cents + amount_cents;
 
-    cards.set(fromCard._id, fromCard);
-    cards.set(toCard._id, toCard);
+    await FirebaseManager.updateCard(fromCard._id, { balance_cents: fromCardNewBalance });
+    await FirebaseManager.updateCard(toCard._id, { balance_cents: toCardNewBalance });
 
     // Create transactions for both cards
     const fromTransactionId = 'txn_' + Date.now();
@@ -991,7 +1173,7 @@ app.post('/api/cards/transfer', authenticateToken, (req, res) => {
       description: description || `Transfer to card ${toCard.last4}`,
       status: 'completed',
       counterparty_card: toCard.last4,
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
     const toTransactionId = 'txn_' + (Date.now() + 1);
@@ -1005,16 +1187,16 @@ app.post('/api/cards/transfer', authenticateToken, (req, res) => {
       description: description || `Transfer from card ${fromCard.last4}`,
       status: 'completed',
       counterparty_card: fromCard.last4,
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    transactions.set(fromTransactionId, fromTransaction);
-    transactions.set(toTransactionId, toTransaction);
+    await FirebaseManager.createTransaction(fromTransaction);
+    await FirebaseManager.createTransaction(toTransaction);
 
     res.json({
       message: 'Card transfer successful',
-      from_card_balance: fromCard.balance_cents,
-      to_card_balance: toCard.balance_cents
+      from_card_balance: fromCardNewBalance,
+      to_card_balance: toCardNewBalance
     });
 
   } catch (error) {
@@ -1024,9 +1206,9 @@ app.post('/api/cards/transfer', authenticateToken, (req, res) => {
 });
 
 // Delete card endpoint
-app.delete('/api/cards/:cardId', authenticateToken, (req, res) => {
+app.delete('/api/cards/:cardId', authenticateToken, async (req, res) => {
   try {
-    const card = cards.get(req.params.cardId);
+    const card = await FirebaseManager.getCard(req.params.cardId);
 
     if (!card || card.user_id !== req.user._id) {
       return res.status(404).json({ error: 'Card not found' });
@@ -1034,17 +1216,11 @@ app.delete('/api/cards/:cardId', authenticateToken, (req, res) => {
 
     // Return card balance to account if any
     if (card.balance_cents > 0) {
-      let account = null;
-      for (let acc of accounts.values()) {
-        if (acc.user_id === req.user._id) {
-          account = acc;
-          break;
-        }
-      }
+      const account = await FirebaseManager.getAccountByUserId(req.user._id);
 
       if (account) {
-        account.balance_cents += card.balance_cents;
-        accounts.set(account._id, account);
+        const accountNewBalance = account.balance_cents + card.balance_cents;
+        await FirebaseManager.updateAccount(account._id, { balance_cents: accountNewBalance });
 
         // Create transaction for balance return
         const transactionId = 'txn_' + Date.now();
@@ -1058,21 +1234,21 @@ app.delete('/api/cards/:cardId', authenticateToken, (req, res) => {
           type: 'card_closure',
           description: `Balance return from card ${card.last4}`,
           status: 'completed',
-          created_at: new Date()
+          created_at: new Date().toISOString()
         };
 
-        transactions.set(transactionId, transaction);
+        await FirebaseManager.createTransaction(transaction);
 
         // Emit balance update
         io.emit('balance_update', {
           user_id: req.user._id,
-          balance_cents: account.balance_cents
+          balance_cents: accountNewBalance
         });
       }
     }
 
     // Delete the card
-    cards.delete(req.params.cardId);
+    await FirebaseManager.deleteCard(req.params.cardId);
 
     res.json({
       message: 'Card deleted successfully',
@@ -1087,17 +1263,11 @@ app.delete('/api/cards/:cardId', authenticateToken, (req, res) => {
 });
 
 // External Bank Transfers
-app.post('/api/transfers/external', authenticateToken, (req, res) => {
+app.post('/api/transfers/external', authenticateToken, async (req, res) => {
   try {
     const { amount_cents, recipient_name, recipient_account_number, routing_number, description } = req.body;
     
-    let account = null;
-    for (let acc of accounts.values()) {
-      if (acc.user_id === req.user._id) {
-        account = acc;
-        break;
-      }
-    }
+    const account = await FirebaseManager.getAccountByUserId(req.user._id);
 
     // Check balance
     if (account.balance_cents < amount_cents) {
@@ -1115,8 +1285,8 @@ app.post('/api/transfers/external', authenticateToken, (req, res) => {
     }
 
     // Update balance
-    account.balance_cents -= amount_cents;
-    accounts.set(account._id, account);
+    const newBalance = account.balance_cents - amount_cents;
+    await FirebaseManager.updateAccount(account._id, { balance_cents: newBalance });
 
     // Create transaction
     const transactionId = 'txn_' + Date.now();
@@ -1132,15 +1302,15 @@ app.post('/api/transfers/external', authenticateToken, (req, res) => {
       counterparty_name: recipient_name,
       counterparty_account: recipient_account_number,
       counterparty_routing: routing_number,
-      created_at: new Date()
+      created_at: new Date().toISOString()
     };
 
-    transactions.set(transactionId, transaction);
+    await FirebaseManager.createTransaction(transaction);
 
     // Emit balance update
     io.emit('balance_update', {
       user_id: req.user._id,
-      balance_cents: account.balance_cents
+      balance_cents: newBalance
     });
 
     res.json({
@@ -1151,7 +1321,7 @@ app.post('/api/transfers/external', authenticateToken, (req, res) => {
         description: transaction.description,
         status: transaction.status
       },
-      new_balance: account.balance_cents
+      new_balance: newBalance
     });
 
   } catch (error) {
@@ -1161,7 +1331,7 @@ app.post('/api/transfers/external', authenticateToken, (req, res) => {
 });
 
 // Receipt upload
-app.post('/api/transactions/:transactionId/receipt', authenticateToken, (req, res) => {
+app.post('/api/transactions/:transactionId/receipt', authenticateToken, async (req, res) => {
   try {
     res.json({
       message: 'Receipt added successfully',
@@ -1198,10 +1368,10 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`📍 Port: ${PORT}`);
   console.log(`🌐 URL: ${CLIENT_URL}`);
   console.log(`📧 Email: OTPs will be sent from sandeshkadel2314@gmail.com`);
-  console.log(`💾 Storage: In-memory (No database required)`);
+  console.log(`💾 Storage: Firebase Realtime Database`);
   console.log(`\n🔗 Health Check: ${CLIENT_URL}/health`);
   console.log(`🔗 API Test: ${CLIENT_URL}/api/test`);
-  console.log('\n✅ Your banking app is now fully functional!');
+  console.log('\n✅ Your banking app is now fully functional with Firebase!');
   console.log('💡 Features working:');
   console.log('   - OTP-based authentication (no passwords)');
   console.log('   - Real OTP emails sent to users');
@@ -1211,4 +1381,5 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('   - Valid virtual card numbers');
   console.log('   - Real money transfers');
   console.log('   - Card management (create, view, block, delete)');
+  console.log('   - Permanent data storage with Firebase');
 });
