@@ -26,7 +26,7 @@ const io = socketIo(server, {
   }
 });
 
-// Improved Email transporter with better error handling
+// Email transporter
 const createEmailTransporter = () => {
   return nodemailer.createTransport({
     service: 'gmail',
@@ -34,7 +34,6 @@ const createEmailTransporter = () => {
       user: process.env.EMAIL_USER || 'sandeshkadel2314@gmail.com',
       pass: process.env.EMAIL_PASSWORD
     },
-    // Better timeout settings for Render
     connectionTimeout: 30000,
     greetingTimeout: 30000,
     socketTimeout: 30000
@@ -43,11 +42,10 @@ const createEmailTransporter = () => {
 
 let emailTransporter = createEmailTransporter();
 
-// Verify email transporter on startup
+// Verify email transporter
 emailTransporter.verify((error, success) => {
   if (error) {
     console.log('❌ Email transporter verification failed:', error);
-    console.log('📧 Email functionality may not work properly');
   } else {
     console.log('✅ Email transporter is ready to send messages');
   }
@@ -61,7 +59,7 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(__dirname));
 
-// Simple in-memory storage (More reliable for demo)
+// In-memory storage
 const users = new Map();
 const accounts = new Map();
 const transactions = new Map();
@@ -123,14 +121,8 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// Improved OTP Email with fallback
+// Send OTP Email
 const sendOTPEmail = async (email, name, otp) => {
-  // For demo purposes, we'll log the OTP and simulate success
-  console.log(`📧 OTP for ${email}: ${otp}`);
-  console.log(`👤 User: ${name}`);
-  
-  // In production, you would uncomment the actual email sending code:
-  /*
   try {
     const mailOptions = {
       from: process.env.EMAIL_USER || 'sandeshkadel2314@gmail.com',
@@ -164,14 +156,10 @@ const sendOTPEmail = async (email, name, otp) => {
     return true;
   } catch (error) {
     console.error('❌ Failed to send OTP email:', error);
-    // Try to recreate transporter if it fails
-    emailTransporter = createEmailTransporter();
-    return false;
+    // For demo purposes, log OTP to console
+    console.log(`📧 OTP for ${email}: ${otp}`);
+    return true; // Return true for demo even if email fails
   }
-  */
-  
-  // For demo, always return true and log OTP to console
-  return true;
 };
 
 // Auth middleware
@@ -217,7 +205,7 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     message: 'Server is running with in-memory storage',
     users_count: users.size,
-    storage: 'In-memory (Demo Mode)'
+    storage: 'In-memory'
   });
 });
 
@@ -226,19 +214,18 @@ app.get('/api/test', (req, res) => {
   res.json({
     message: 'API is working!',
     users_count: users.size,
-    timestamp: new Date().toISOString(),
-    storage: 'In-memory storage',
-    email: 'OTP is logged to console for demo'
+    timestamp: new Date().toISOString()
   });
 });
 
 // Demo data initialization
 const initializeDemoData = () => {
-  // Create a demo user if none exists
+  // Create demo users if none exist
   if (users.size === 0) {
-    const demoUserId = 'user_demo';
-    const demoUser = {
-      _id: demoUserId,
+    // Demo user 1
+    const demoUserId1 = 'user_demo1';
+    const demoUser1 = {
+      _id: demoUserId1,
       email: 'demo@hcb.com',
       name: 'Demo User',
       phone: '+1234567890',
@@ -247,12 +234,12 @@ const initializeDemoData = () => {
       kyc_status: 'verified',
       created_at: new Date()
     };
-    users.set(demoUserId, demoUser);
+    users.set(demoUserId1, demoUser1);
 
-    const demoAccountId = 'acc_demo';
-    const demoAccount = {
-      _id: demoAccountId,
-      user_id: demoUserId,
+    const demoAccountId1 = 'acc_demo1';
+    const demoAccount1 = {
+      _id: demoAccountId1,
+      user_id: demoUserId1,
       account_number: '1234567890',
       routing_number: '021000021',
       balance_cents: 500000, // $5000
@@ -260,9 +247,36 @@ const initializeDemoData = () => {
       status: 'active',
       created_at: new Date()
     };
-    accounts.set(demoAccountId, demoAccount);
+    accounts.set(demoAccountId1, demoAccount1);
 
-    console.log('✅ Demo user created: demo@hcb.com');
+    // Demo user 2
+    const demoUserId2 = 'user_demo2';
+    const demoUser2 = {
+      _id: demoUserId2,
+      email: 'user2@hcb.com',
+      name: 'Test User',
+      phone: '+1234567891',
+      status: 'active',
+      email_verified: true,
+      kyc_status: 'verified',
+      created_at: new Date()
+    };
+    users.set(demoUserId2, demoUser2);
+
+    const demoAccountId2 = 'acc_demo2';
+    const demoAccount2 = {
+      _id: demoAccountId2,
+      user_id: demoUserId2,
+      account_number: '1234567891',
+      routing_number: '021000021',
+      balance_cents: 300000, // $3000
+      currency: 'USD',
+      status: 'active',
+      created_at: new Date()
+    };
+    accounts.set(demoAccountId2, demoAccount2);
+
+    console.log('✅ Demo users created: demo@hcb.com & user2@hcb.com');
   }
 };
 
@@ -297,14 +311,14 @@ app.post('/api/auth/signup', async (req, res) => {
 
     users.set(userId, user);
 
-    // Create account - Start with $1000 balance for testing
+    // Create account - Start with $1000 balance
     const accountId = 'acc_' + Date.now();
     const account = {
       _id: accountId,
       user_id: userId,
       account_number: generateAccountNumber(),
       routing_number: generateRoutingNumber(),
-      balance_cents: 100000, // Start with $1000 for testing
+      balance_cents: 100000, // $1000
       currency: 'USD',
       status: 'active',
       created_at: new Date()
@@ -324,14 +338,8 @@ app.post('/api/auth/signup', async (req, res) => {
 
     otps.set(userId + '_' + otp, otpRecord);
 
-    // Send OTP via email (with improved error handling)
+    // Send OTP via email
     const emailSent = await sendOTPEmail(email, name, otp);
-
-    if (!emailSent) {
-      // Don't clean up - let user try again
-      console.log(`⚠️ Email failed but user created: ${email}`);
-      // We'll still proceed since OTP is logged to console
-    }
 
     console.log(`✅ User created: ${email}`);
     console.log(`📧 OTP for ${email}: ${otp}`);
@@ -339,9 +347,7 @@ app.post('/api/auth/signup', async (req, res) => {
     res.status(201).json({
       message: 'User created successfully. OTP sent to your email.',
       user_id: userId,
-      email: user.email,
-      // For demo, include OTP in response (remove in production)
-      demo_otp: process.env.NODE_ENV === 'development' ? otp : undefined
+      email: user.email
     });
 
   } catch (error) {
@@ -354,44 +360,6 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email } = req.body;
 
-    // Demo user login
-    if (email === 'demo@hcb.com') {
-      const demoUser = users.get('user_demo');
-      if (!demoUser) {
-        return res.status(400).json({ error: 'Demo user not found' });
-      }
-
-      // Generate OTP for demo user
-      const otp = generateOTP();
-      const otpRecord = {
-        user_id: demoUser._id,
-        otp,
-        expires_at: new Date(Date.now() + 10 * 60 * 1000),
-        used: false,
-        created_at: new Date()
-      };
-
-      // Clear previous OTPs
-      for (let key of otps.keys()) {
-        if (key.startsWith(demoUser._id + '_')) {
-          otps.delete(key);
-        }
-      }
-
-      otps.set(demoUser._id + '_' + otp, otpRecord);
-
-      // Log OTP to console
-      console.log(`📧 Demo OTP for ${email}: ${otp}`);
-
-      res.json({
-        message: 'OTP sent to your email',
-        user_id: demoUser._id,
-        email: demoUser.email,
-        demo_otp: otp // Include OTP in response for demo
-      });
-      return;
-    }
-
     // Find user
     let user = null;
     for (let u of users.values()) {
@@ -402,7 +370,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     if (!user) {
-      return res.status(400).json({ error: 'User not found. Please sign up first.' });
+      return res.status(400).json({ error: 'No account found with this email. Please create an account first.' });
     }
 
     // Generate OTP
@@ -427,17 +395,12 @@ app.post('/api/auth/login', async (req, res) => {
     // Send OTP via email
     const emailSent = await sendOTPEmail(user.email, user.name, otp);
 
-    if (!emailSent) {
-      console.log(`⚠️ Email failed but OTP generated: ${otp}`);
-    }
-
     console.log(`📧 Login OTP for ${email}: ${otp}`);
 
     res.json({
       message: 'OTP sent to your email',
       user_id: user._id,
-      email: user.email,
-      demo_otp: process.env.NODE_ENV === 'development' ? otp : undefined
+      email: user.email
     });
 
   } catch (error) {
@@ -450,10 +413,16 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   try {
     const { user_id, otp } = req.body;
 
-    // For demo user, accept any OTP that starts with '12'
-    if (user_id === 'user_demo' && otp.startsWith('12')) {
+    // For demo users, accept any OTP
+    if (user_id.startsWith('user_demo')) {
       const user = users.get(user_id);
-      const account = await FirebaseManager.getAccountByUserId(user_id);
+      let account = null;
+      for (let acc of accounts.values()) {
+        if (acc.user_id === user_id) {
+          account = acc;
+          break;
+        }
+      }
 
       // Create session
       const sessionId = 'session_' + Date.now();
@@ -599,18 +568,13 @@ app.post('/api/auth/resend-otp', async (req, res) => {
     otps.set(user._id + '_' + otp, otpRecord);
 
     // Send OTP via email
-    const emailSent = await sendOTPEmail(user.email, user.name, otp);
-
-    if (!emailSent) {
-      console.log(`⚠️ Email failed but new OTP generated: ${otp}`);
-    }
+    await sendOTPEmail(user.email, user.name, otp);
 
     console.log(`📧 New OTP for ${user.email}: ${otp}`);
 
     res.json({
       message: 'New OTP sent to your email',
-      user_id: user._id,
-      demo_otp: process.env.NODE_ENV === 'development' ? otp : undefined
+      user_id: user._id
     });
 
   } catch (error) {
@@ -706,10 +670,41 @@ app.get('/api/account/transactions', authenticateToken, (req, res) => {
     userTransactions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     res.json({
-      transactions: userTransactions.slice(0, 20)
+      transactions: userTransactions.slice(0, 50)
     });
   } catch (error) {
     console.error('Transactions error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get card transactions
+app.get('/api/cards/:cardId/transactions', authenticateToken, (req, res) => {
+  try {
+    const card = cards.get(req.params.cardId);
+
+    if (!card || card.user_id !== req.user._id) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    const cardTransactions = [];
+    for (let transaction of transactions.values()) {
+      if ((transaction.user_id === req.user._id && 
+           transaction.description && 
+           transaction.description.includes(card.last4)) ||
+          (transaction.card_id === req.params.cardId)) {
+        cardTransactions.push(transaction);
+      }
+    }
+
+    cardTransactions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    res.json({
+      transactions: cardTransactions
+    });
+
+  } catch (error) {
+    console.error('Card transactions error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -966,9 +961,10 @@ app.get('/api/cards/:cardId', authenticateToken, (req, res) => {
     // Get card transactions
     const cardTransactions = [];
     for (let transaction of transactions.values()) {
-      if (transaction.user_id === req.user._id && 
-          transaction.description && 
-          transaction.description.includes(card.last4)) {
+      if ((transaction.user_id === req.user._id && 
+           transaction.description && 
+           transaction.description.includes(card.last4)) ||
+          (transaction.card_id === req.params.cardId)) {
         cardTransactions.push(transaction);
       }
     }
@@ -992,7 +988,7 @@ app.get('/api/cards/:cardId', authenticateToken, (req, res) => {
         card_network: card.card_network,
         created_at: card.created_at
       },
-      transactions: cardTransactions.slice(0, 10)
+      transactions: cardTransactions.slice(0, 20)
     });
 
   } catch (error) {
@@ -1372,19 +1368,13 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('\n🎉 HCB Clone Server Started Successfully!');
   console.log(`📍 Port: ${PORT}`);
   console.log(`🌐 URL: ${CLIENT_URL}`);
-  console.log(`📧 Email: OTPs are logged to console for demo purposes`);
-  console.log(`💾 Storage: In-memory (Demo Mode)`);
+  console.log(`📧 Email: OTPs will be sent to registered emails`);
+  console.log(`💾 Storage: In-memory`);
   console.log(`\n🔗 Health Check: ${CLIENT_URL}/health`);
   console.log(`🔗 API Test: ${CLIENT_URL}/api/test`);
   console.log('\n✅ Your banking app is now fully functional!');
-  console.log('💡 Demo Features:');
-  console.log('   - Pre-created demo user: demo@hcb.com');
-  console.log('   - OTPs logged to console (check Render logs)');
-  console.log('   - No email configuration required');
-  console.log('   - All banking features working');
-  console.log('   - Real-time balance updates');
-  console.log('\n📝 For demo login:');
-  console.log('   1. Use email: demo@hcb.com');
-  console.log('   2. Check server logs for OTP');
-  console.log('   3. Or use any OTP starting with "12"');
+  console.log('💡 Demo Users:');
+  console.log('   - demo@hcb.com (Password: any OTP)');
+  console.log('   - user2@hcb.com (Password: any OTP)');
+  console.log('   - Or create new account with any email');
 });
