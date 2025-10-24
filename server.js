@@ -8,7 +8,18 @@ const http = require('http');
 const cors = require('cors');
 const path = require('path');
 const admin = require('firebase-admin');
-const Stripe = require('stripe');
+
+// Check if Stripe module is available
+let Stripe;
+let stripe;
+try {
+  Stripe = require('stripe');
+  console.log('✅ Stripe module loaded successfully');
+} catch (error) {
+  console.error('❌ Stripe module not found. Please run: npm install stripe');
+  console.error('💡 Run: npm install stripe');
+  process.exit(1);
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -21,11 +32,21 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_51Ru6f5JNa6A
 const STRIPE_RESTRICTED_KEY = process.env.STRIPE_RESTRICTED_KEY || 'rk_test_51Ru6f5JNa6A3w8pIC66USMcZvaD53Rry8nIu7X5tD4Sax3qcJAyZdclBsyxBYkUB3fZI8MaGNQcJEAeP4ZOMzz5000YI4W4fxs';
 
 // Initialize Stripe with restricted key for Issuing
-const stripe = Stripe(STRIPE_RESTRICTED_KEY);
+try {
+  if (!STRIPE_RESTRICTED_KEY) {
+    throw new Error('STRIPE_RESTRICTED_KEY is required');
+  }
+  stripe = Stripe(STRIPE_RESTRICTED_KEY);
+  console.log('✅ Stripe initialized successfully');
+} catch (error) {
+  console.error('❌ Stripe initialization failed:', error.message);
+  stripe = null;
+}
+
 const CARDHOLDER_ID = process.env.CARDHOLDER_ID;
 
 console.log('🚀 Starting HCB Clone Server with Stripe Issuing...');
-console.log(`💳 Stripe Mode: ${STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE'}`);
+console.log(`💳 Stripe Mode: ${STRIPE_RESTRICTED_KEY && STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE'}`);
 
 // Initialize Firebase Admin
 try {
@@ -380,6 +401,11 @@ const sendOTPEmail = async (email, name, otp) => {
 // Create Stripe Cardholder (run once to set up)
 const createStripeCardholder = async () => {
   try {
+    if (!stripe) {
+      console.log('⚠️ Stripe not initialized, skipping cardholder creation');
+      return null;
+    }
+
     if (!CARDHOLDER_ID) {
       console.log('🔄 Creating Stripe cardholder...');
       const cardholder = await stripe.issuing.cardholders.create({
@@ -461,8 +487,8 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     message: 'Server is running with Stripe Issuing',
     storage: db ? 'Firebase Firestore' : 'In-memory',
-    stripe: 'Enabled',
-    stripe_mode: STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE'
+    stripe: stripe ? 'Enabled' : 'Disabled',
+    stripe_mode: STRIPE_RESTRICTED_KEY && STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE'
   });
 });
 
@@ -471,8 +497,8 @@ app.get('/api/test', (req, res) => {
   res.json({
     message: 'API is working with Stripe!',
     storage: db ? 'Firebase' : 'In-memory',
-    stripe: 'Enabled',
-    stripe_mode: STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE',
+    stripe: stripe ? 'Enabled' : 'Disabled',
+    stripe_mode: STRIPE_RESTRICTED_KEY && STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE',
     timestamp: new Date().toISOString()
   });
 });
@@ -480,12 +506,19 @@ app.get('/api/test', (req, res) => {
 // Stripe test endpoint
 app.get('/api/stripe/test', authenticateToken, async (req, res) => {
   try {
+    if (!stripe) {
+      return res.status(500).json({
+        error: 'Stripe not initialized',
+        message: 'Stripe module is not properly configured'
+      });
+    }
+
     // Test Stripe connection by listing cardholders
     const cardholders = await stripe.issuing.cardholders.list({limit: 1});
     
     res.json({
       message: 'Stripe connection successful!',
-      stripe_mode: STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE',
+      stripe_mode: STRIPE_RESTRICTED_KEY && STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE',
       cardholders_count: cardholders.data.length,
       can_create_cards: true
     });
@@ -622,6 +655,10 @@ initializeDemoData();
 // Stripe Card Routes
 app.post('/api/stripe/create-virtual-card', authenticateToken, async (req, res) => {
   try {
+    if (!stripe) {
+      return res.status(500).json({ error: 'Stripe not initialized. Please check server configuration.' });
+    }
+
     const { currency = 'usd', card_owner, organization_id } = req.body;
 
     if (!CARDHOLDER_ID) {
@@ -773,6 +810,10 @@ app.get('/api/stripe/cards/:cardId', authenticateToken, async (req, res) => {
 // Update Stripe card
 app.put('/api/stripe/cards/:cardId', authenticateToken, async (req, res) => {
   try {
+    if (!stripe) {
+      return res.status(500).json({ error: 'Stripe not initialized' });
+    }
+
     const { status, card_owner } = req.body;
     const card = await FirebaseManager.getStripeCardById(req.params.cardId);
 
@@ -867,6 +908,10 @@ app.post('/api/stripe/cards/:cardId/fund', authenticateToken, async (req, res) =
 // Create organization Stripe card
 app.post('/api/organizations/:orgId/stripe-cards', authenticateToken, async (req, res) => {
   try {
+    if (!stripe) {
+      return res.status(500).json({ error: 'Stripe not initialized' });
+    }
+
     const organization = await FirebaseManager.getOrganizationById(req.params.orgId);
 
     if (!organization) {
@@ -989,6 +1034,10 @@ app.post('/api/cards', authenticateToken, async (req, res) => {
   try {
     // Default to creating Stripe cards
     const { card_owner, organization_id } = req.body;
+
+    if (!stripe) {
+      return res.status(500).json({ error: 'Stripe not initialized. Please check server configuration.' });
+    }
 
     if (!CARDHOLDER_ID) {
       return res.status(500).json({ error: 'Stripe cardholder not configured' });
@@ -1146,7 +1195,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 URL: ${CLIENT_URL}`);
   console.log(`📧 Email: OTPs will be sent to registered emails`);
   console.log(`💾 Storage: ${db ? 'Firebase Firestore' : 'In-memory'}`);
-  console.log(`💳 Stripe: Real virtual cards enabled (TEST MODE)`);
+  console.log(`💳 Stripe: ${stripe ? 'Real virtual cards enabled (TEST MODE)' : 'Disabled - check configuration'}`);
   console.log(`🔑 JWT: Authentication enabled`);
   console.log(`\n🔗 Health Check: ${CLIENT_URL}/health`);
   console.log(`🔗 API Test: ${CLIENT_URL}/api/test`);
@@ -1156,10 +1205,15 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('   - demo@hcb.com (Password: any OTP)');
   console.log('   - user2@hcb.com (Password: any OTP)');
   console.log('   - Or create new account with any email');
-  console.log('\n🆕 Stripe Features:');
-  console.log('   ✅ Real Stripe virtual card generation');
-  console.log('   ✅ Stripe Issuing API integration');
-  console.log('   ✅ Real card numbers with proper validation');
-  console.log('   ✅ Organization Stripe card support');
-  console.log('   ✅ Enhanced security with Stripe Issuing');
+  if (stripe) {
+    console.log('\n🆕 Stripe Features:');
+    console.log('   ✅ Real Stripe virtual card generation');
+    console.log('   ✅ Stripe Issuing API integration');
+    console.log('   ✅ Real card numbers with proper validation');
+    console.log('   ✅ Organization Stripe card support');
+    console.log('   ✅ Enhanced security with Stripe Issuing');
+  } else {
+    console.log('\n⚠️  Stripe Features Disabled:');
+    console.log('   Please check your Stripe configuration');
+  }
 });
