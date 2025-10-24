@@ -530,7 +530,7 @@ app.get('/api/stripe/test', authenticateToken, async (req, res) => {
   }
 });
 
-// ========== MISSING AUTH ROUTES ==========
+// ========== AUTH ROUTES ==========
 
 // Signup endpoint
 app.post('/api/auth/signup', async (req, res) => {
@@ -569,7 +569,7 @@ app.post('/api/auth/signup', async (req, res) => {
       user_id: userId,
       account_number: generateAccountNumber(),
       routing_number: generateRoutingNumber(),
-      balance_cents: 0,
+      balance_cents: 100000, // Start with $1000 for demo
       currency: 'USD',
       status: 'active',
       created_at: new Date()
@@ -647,20 +647,27 @@ app.post('/api/auth/verify-otp', async (req, res) => {
       return res.status(400).json({ error: 'User ID and OTP are required' });
     }
 
-    // Check OTP
-    const otpData = otps.get(user_id);
-    if (!otpData || otpData.otp !== otp) {
-      return res.status(400).json({ error: 'Invalid OTP' });
-    }
+    // For demo purposes, accept any OTP for demo accounts
+    const user = await FirebaseManager.getUser(user_id);
+    if (user && (user.email.includes('demo@hcb.com') || user.email.includes('user2@hcb.com'))) {
+      // Accept any OTP for demo accounts
+      console.log(`✅ Demo user ${user.email} OTP bypassed`);
+    } else {
+      // Check OTP for real users
+      const otpData = otps.get(user_id);
+      if (!otpData || otpData.otp !== otp) {
+        return res.status(400).json({ error: 'Invalid OTP' });
+      }
 
-    if (Date.now() > otpData.expires) {
-      otps.delete(user_id);
-      return res.status(400).json({ error: 'OTP has expired' });
+      if (Date.now() > otpData.expires) {
+        otps.delete(user_id);
+        return res.status(400).json({ error: 'OTP has expired' });
+      }
     }
 
     // OTP is valid, get user data
-    const user = await FirebaseManager.getUser(user_id);
-    if (!user) {
+    const userData = await FirebaseManager.getUser(user_id);
+    if (!userData) {
       return res.status(400).json({ error: 'User not found' });
     }
 
@@ -670,14 +677,14 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     // Create session
     const sessionId = 'session_' + Date.now();
     sessions.set(sessionId, {
-      user_id: user._id,
+      user_id: userData._id,
       created_at: Date.now()
     });
 
     // Generate JWT token
     const token = jwt.sign(
       { 
-        userId: user._id, 
+        userId: userData._id, 
         sessionId: sessionId 
       }, 
       JWT_SECRET, 
@@ -691,12 +698,12 @@ app.post('/api/auth/verify-otp', async (req, res) => {
       message: 'Login successful',
       token,
       user: {
-        _id: user._id,
-        email: user.email,
-        name: user.name,
-        phone: user.phone,
-        email_verified: user.email_verified,
-        kyc_status: user.kyc_status
+        _id: userData._id,
+        email: userData.email,
+        name: userData.name,
+        phone: userData.phone,
+        email_verified: userData.email_verified,
+        kyc_status: userData.kyc_status
       },
       account: account
     });
@@ -754,7 +761,7 @@ app.get('/api/auth/check-session', authenticateToken, async (req, res) => {
   }
 });
 
-// ========== MISSING PROFILE ROUTES ==========
+// ========== PROFILE ROUTES ==========
 
 // Get profile endpoint
 app.get('/api/profile', authenticateToken, async (req, res) => {
@@ -793,7 +800,7 @@ app.put('/api/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// ========== MISSING ACCOUNT ROUTES ==========
+// ========== ACCOUNT ROUTES ==========
 
 // Get transactions endpoint
 app.get('/api/account/transactions', authenticateToken, async (req, res) => {
@@ -960,7 +967,185 @@ app.post('/api/account/transfer', authenticateToken, async (req, res) => {
   }
 });
 
-// ========== MISSING CARD ROUTES ==========
+// ========== CARD ROUTES ==========
+
+// Get cards endpoint
+app.get('/api/cards', authenticateToken, async (req, res) => {
+  try {
+    const cards = await FirebaseManager.getCardsByUserId(req.user._id);
+    const stripeCards = await FirebaseManager.getStripeCardsByUserId(req.user._id);
+    
+    // Combine both types of cards
+    const allCards = [
+      ...cards,
+      ...stripeCards.map(sc => ({
+        _id: sc.id,
+        user_id: sc.user_id,
+        card_number: sc.card_number,
+        last4: sc.last4,
+        expiry_month: sc.expiry_month,
+        expiry_year: sc.expiry_year,
+        cvv: sc.cvv,
+        brand: sc.brand,
+        status: sc.status,
+        balance_cents: sc.balance_cents,
+        card_owner: sc.card_owner,
+        billing_address: sc.billing_address,
+        phone_number: sc.phone_number,
+        card_type: 'virtual',
+        card_network: sc.brand.toLowerCase(),
+        created_at: new Date(sc.created * 1000),
+        is_stripe_card: true,
+        stripe_card_id: sc.id
+      }))
+    ];
+
+    res.json({
+      cards: allCards.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    });
+  } catch (error) {
+    console.error('Cards error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create card endpoint
+app.post('/api/cards', authenticateToken, async (req, res) => {
+  try {
+    const { card_owner, organization_id } = req.body;
+
+    // Try to create real Stripe card first
+    if (stripe && CARDHOLDER_ID) {
+      try {
+        console.log(`🔄 Creating real Stripe virtual card for user: ${req.user.email}`);
+
+        const cardParams = {
+          cardholder: CARDHOLDER_ID,
+          currency: 'usd',
+          type: 'virtual',
+          status: 'active',
+          metadata: {
+            user_id: req.user._id,
+            user_email: req.user.email,
+            card_owner: card_owner || req.user.name,
+            created_via: 'hcb_clone'
+          }
+        };
+
+        const stripeCard = await stripe.issuing.cards.create(cardParams);
+
+        console.log(`✅ Real Stripe card created: ${stripeCard.id}`);
+
+        // Store card in Firebase
+        const cardData = {
+          id: stripeCard.id,
+          user_id: req.user._id,
+          card_number: stripeCard.number,
+          last4: stripeCard.last4,
+          expiry_month: stripeCard.exp_month,
+          expiry_year: stripeCard.exp_year,
+          cvv: stripeCard.cvc,
+          brand: stripeCard.brand,
+          status: stripeCard.status,
+          currency: stripeCard.currency,
+          type: stripeCard.type,
+          card_owner: card_owner || req.user.name,
+          organization_id: organization_id || null,
+          balance_cents: 0,
+          billing_address: {
+            line1: '123 Main Street',
+            city: 'San Francisco',
+            state: 'CA',
+            postal_code: '94111',
+            country: 'US'
+          },
+          created: stripeCard.created,
+          stripe_object: 'issuing.card'
+        };
+
+        await FirebaseManager.saveStripeCard(cardData);
+
+        // Also store in regular cards collection for compatibility
+        const compatibleCard = {
+          _id: `card_${stripeCard.id}`,
+          user_id: req.user._id,
+          card_number: stripeCard.number,
+          last4: stripeCard.last4,
+          expiry_month: stripeCard.exp_month,
+          expiry_year: stripeCard.exp_year,
+          cvv: stripeCard.cvc,
+          brand: stripeCard.brand,
+          status: stripeCard.status,
+          balance_cents: 0,
+          card_owner: card_owner || req.user.name,
+          billing_address: {
+            street: '123 Main Street',
+            city: 'San Francisco',
+            state: 'CA',
+            zip_code: '94111',
+            country: 'US'
+          },
+          phone_number: req.user.phone || '+1234567890',
+          card_type: 'virtual',
+          card_network: stripeCard.brand.toLowerCase(),
+          created_at: new Date(stripeCard.created * 1000),
+          stripe_card_id: stripeCard.id,
+          is_stripe_card: true
+        };
+
+        await FirebaseManager.saveCard(compatibleCard);
+
+        return res.json({
+          message: 'Real virtual card created successfully via Stripe',
+          card: compatibleCard,
+          stripe_card_id: stripeCard.id
+        });
+
+      } catch (stripeError) {
+        console.error('Stripe card creation failed, falling back to virtual card:', stripeError.message);
+      }
+    }
+
+    // Fallback to virtual card if Stripe fails or not configured
+    const cardId = 'card_' + Date.now();
+    const card = {
+      _id: cardId,
+      user_id: req.user._id,
+      card_number: Math.random().toString().slice(2, 18),
+      last4: Math.random().toString().slice(2, 6),
+      expiry_month: Math.floor(Math.random() * 12) + 1,
+      expiry_year: new Date().getFullYear() + 3,
+      cvv: Math.floor(Math.random() * 900) + 100,
+      brand: 'Visa',
+      status: 'active',
+      balance_cents: 0,
+      card_owner: card_owner || req.user.name,
+      billing_address: {
+        street: '123 Main Street',
+        city: 'San Francisco',
+        state: 'CA',
+        zip_code: '94111',
+        country: 'US'
+      },
+      phone_number: req.user.phone || '+1234567890',
+      card_type: 'virtual',
+      card_network: 'visa',
+      created_at: new Date(),
+      is_stripe_card: false
+    };
+
+    await FirebaseManager.saveCard(card);
+
+    res.json({
+      message: 'Virtual card created successfully',
+      card: card
+    });
+
+  } catch (error) {
+    console.error('Create card error:', error);
+    res.status(500).json({ error: 'Internal server error during card creation' });
+  }
+});
 
 // Get card details endpoint
 app.get('/api/cards/:cardId', authenticateToken, async (req, res) => {
@@ -1297,7 +1482,7 @@ app.post('/api/cards/transfer-to-bank', authenticateToken, async (req, res) => {
   }
 });
 
-// ========== MISSING ORGANIZATION ROUTES ==========
+// ========== ORGANIZATION ROUTES ==========
 
 // Get organizations endpoint
 app.get('/api/organizations', authenticateToken, async (req, res) => {
@@ -1323,6 +1508,26 @@ app.get('/api/organizations/all', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('All organizations error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Search organizations endpoint
+app.get('/api/organizations/search', authenticateToken, async (req, res) => {
+  try {
+    const { q } = req.query;
+    
+    if (!q) {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+
+    const organizations = await FirebaseManager.searchOrganizations(q);
+    
+    res.json({
+      organizations: organizations
+    });
+  } catch (error) {
+    console.error('Search organizations error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1560,6 +1765,11 @@ app.put('/api/organizations/:orgId/member-role', authenticateToken, async (req, 
       return res.status(403).json({ error: 'Only organization owner can change roles' });
     }
 
+    // Cannot change owner role
+    if (user_id === organization.owner_id) {
+      return res.status(400).json({ error: 'Cannot change owner role' });
+    }
+
     // Find member and update role
     const memberIndex = organization.members.findIndex(member => member.user_id === user_id);
     if (memberIndex === -1) {
@@ -1726,7 +1936,7 @@ app.delete('/api/organizations/:orgId/cards/:cardId', authenticateToken, async (
   }
 });
 
-// ========== MISSING PAYMENT ROUTES ==========
+// ========== PAYMENT ROUTES ==========
 
 // Process payment endpoint
 app.post('/api/payments/process', authenticateToken, async (req, res) => {
@@ -1779,7 +1989,7 @@ app.post('/api/payments/process', authenticateToken, async (req, res) => {
   }
 });
 
-// ========== MISSING TRANSFER ROUTES ==========
+// ========== TRANSFER ROUTES ==========
 
 // External transfer endpoint
 app.post('/api/transfers/external', authenticateToken, async (req, res) => {
