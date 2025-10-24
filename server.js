@@ -49,27 +49,34 @@ console.log('🚀 Starting HCB Clone Server with Stripe Issuing...');
 console.log(`💳 Stripe Mode: ${STRIPE_RESTRICTED_KEY && STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE'}`);
 
 // Initialize Firebase Admin
+let db = null;
 try {
-  const serviceAccount = {
-    type: "service_account",
-    project_id: "hcb-4ce8c",
-    private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-    private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    client_email: process.env.FIREBASE_CLIENT_EMAIL,
-    client_id: process.env.FIREBASE_CLIENT_ID,
-    auth_uri: "https://accounts.google.com/o/oauth2/auth",
-    token_uri: "https://oauth2.googleapis.com/token",
-    auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-    client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
-    universe_domain: "googleapis.com"
-  };
+  // For demo purposes, use in-memory storage if Firebase is not configured
+  if (process.env.FIREBASE_PRIVATE_KEY) {
+    const serviceAccount = {
+      type: "service_account",
+      project_id: "hcb-4ce8c",
+      private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+      private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      client_id: process.env.FIREBASE_CLIENT_ID,
+      auth_uri: "https://accounts.google.com/o/oauth2/auth",
+      token_uri: "https://oauth2.googleapis.com/token",
+      auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+      client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
+      universe_domain: "googleapis.com"
+    };
 
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: "https://hcb-4ce8c.firebaseio.com"
-  });
-  
-  console.log('✅ Firebase Admin initialized successfully');
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: "https://hcb-4ce8c.firebaseio.com"
+    });
+    
+    db = admin.firestore();
+    console.log('✅ Firebase Admin initialized successfully');
+  } else {
+    console.log('⚠️ Firebase credentials not found, using in-memory storage');
+  }
 } catch (error) {
   console.log('⚠️ Firebase Admin initialization failed, using in-memory storage:', error.message);
 }
@@ -88,7 +95,7 @@ const createEmailTransporter = () => {
     service: 'gmail',
     auth: {
       user: process.env.EMAIL_USER || 'sandeshkadel2314@gmail.com',
-      pass: process.env.EMAIL_PASSWORD
+      pass: process.env.EMAIL_PASSWORD || 'your_app_password_here'
     },
     connectionTimeout: 30000,
     greetingTimeout: 30000,
@@ -115,17 +122,6 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(__dirname));
 
-// Firebase Firestore reference
-const db = admin.firestore ? admin.firestore() : null;
-
-// Firebase Collections
-const getCollection = (collectionName) => {
-  if (db) {
-    return db.collection(collectionName);
-  }
-  return null;
-};
-
 // In-memory storage fallback
 const users = new Map();
 const accounts = new Map();
@@ -133,33 +129,44 @@ const transactions = new Map();
 const cards = new Map();
 const organizations = new Map();
 const otps = new Map();
-const sessions = new Map();
 
 // Firebase Data Management
 const FirebaseManager = {
   async saveUser(user) {
-    if (getCollection('users')) {
-      await getCollection('users').doc(user._id).set(user);
-    } else {
-      users.set(user._id, user);
+    if (db) {
+      try {
+        await db.collection('users').doc(user._id).set(user);
+        return;
+      } catch (error) {
+        console.error('Firebase saveUser error:', error);
+      }
     }
+    users.set(user._id, user);
   },
 
   async getUser(userId) {
-    if (getCollection('users')) {
-      const doc = await getCollection('users').doc(userId).get();
-      return doc.exists ? doc.data() : null;
+    if (db) {
+      try {
+        const doc = await db.collection('users').doc(userId).get();
+        return doc.exists ? doc.data() : null;
+      } catch (error) {
+        console.error('Firebase getUser error:', error);
+      }
     }
     return users.get(userId);
   },
 
   async getUserByEmail(email) {
-    if (getCollection('users')) {
-      const snapshot = await getCollection('users').where('email', '==', email.toLowerCase()).get();
-      if (!snapshot.empty) {
-        return snapshot.docs[0].data();
+    if (db) {
+      try {
+        const snapshot = await db.collection('users').where('email', '==', email.toLowerCase()).get();
+        if (!snapshot.empty) {
+          return snapshot.docs[0].data();
+        }
+        return null;
+      } catch (error) {
+        console.error('Firebase getUserByEmail error:', error);
       }
-      return null;
     }
     
     for (let user of users.values()) {
@@ -171,20 +178,28 @@ const FirebaseManager = {
   },
 
   async saveAccount(account) {
-    if (getCollection('accounts')) {
-      await getCollection('accounts').doc(account._id).set(account);
-    } else {
-      accounts.set(account._id, account);
+    if (db) {
+      try {
+        await db.collection('accounts').doc(account._id).set(account);
+        return;
+      } catch (error) {
+        console.error('Firebase saveAccount error:', error);
+      }
     }
+    accounts.set(account._id, account);
   },
 
   async getAccountByUserId(userId) {
-    if (getCollection('accounts')) {
-      const snapshot = await getCollection('accounts').where('user_id', '==', userId).get();
-      if (!snapshot.empty) {
-        return snapshot.docs[0].data();
+    if (db) {
+      try {
+        const snapshot = await db.collection('accounts').where('user_id', '==', userId).get();
+        if (!snapshot.empty) {
+          return snapshot.docs[0].data();
+        }
+        return null;
+      } catch (error) {
+        console.error('Firebase getAccountByUserId error:', error);
       }
-      return null;
     }
     
     for (let account of accounts.values()) {
@@ -196,17 +211,25 @@ const FirebaseManager = {
   },
 
   async saveTransaction(transaction) {
-    if (getCollection('transactions')) {
-      await getCollection('transactions').doc(transaction._id).set(transaction);
-    } else {
-      transactions.set(transaction._id, transaction);
+    if (db) {
+      try {
+        await db.collection('transactions').doc(transaction._id).set(transaction);
+        return;
+      } catch (error) {
+        console.error('Firebase saveTransaction error:', error);
+      }
     }
+    transactions.set(transaction._id, transaction);
   },
 
   async getTransactionsByUserId(userId) {
-    if (getCollection('transactions')) {
-      const snapshot = await getCollection('transactions').where('user_id', '==', userId).get();
-      return snapshot.docs.map(doc => doc.data());
+    if (db) {
+      try {
+        const snapshot = await db.collection('transactions').where('user_id', '==', userId).get();
+        return snapshot.docs.map(doc => doc.data());
+      } catch (error) {
+        console.error('Firebase getTransactionsByUserId error:', error);
+      }
     }
     
     const userTransactions = [];
@@ -219,17 +242,25 @@ const FirebaseManager = {
   },
 
   async saveCard(card) {
-    if (getCollection('cards')) {
-      await getCollection('cards').doc(card._id).set(card);
-    } else {
-      cards.set(card._id, card);
+    if (db) {
+      try {
+        await db.collection('cards').doc(card._id).set(card);
+        return;
+      } catch (error) {
+        console.error('Firebase saveCard error:', error);
+      }
     }
+    cards.set(card._id, card);
   },
 
   async getCardsByUserId(userId) {
-    if (getCollection('cards')) {
-      const snapshot = await getCollection('cards').where('user_id', '==', userId).get();
-      return snapshot.docs.map(doc => doc.data());
+    if (db) {
+      try {
+        const snapshot = await db.collection('cards').where('user_id', '==', userId).get();
+        return snapshot.docs.map(doc => doc.data());
+      } catch (error) {
+        console.error('Firebase getCardsByUserId error:', error);
+      }
     }
     
     const userCards = [];
@@ -242,20 +273,28 @@ const FirebaseManager = {
   },
 
   async getCardById(cardId) {
-    if (getCollection('cards')) {
-      const doc = await getCollection('cards').doc(cardId).get();
-      return doc.exists ? doc.data() : null;
+    if (db) {
+      try {
+        const doc = await db.collection('cards').doc(cardId).get();
+        return doc.exists ? doc.data() : null;
+      } catch (error) {
+        console.error('Firebase getCardById error:', error);
+      }
     }
     return cards.get(cardId);
   },
 
   async getCardByNumber(cardNumber) {
-    if (getCollection('cards')) {
-      const snapshot = await getCollection('cards').where('card_number', '==', cardNumber).get();
-      if (!snapshot.empty) {
-        return snapshot.docs[0].data();
+    if (db) {
+      try {
+        const snapshot = await db.collection('cards').where('card_number', '==', cardNumber).get();
+        if (!snapshot.empty) {
+          return snapshot.docs[0].data();
+        }
+        return null;
+      } catch (error) {
+        console.error('Firebase getCardByNumber error:', error);
       }
-      return null;
     }
     
     for (let card of cards.values()) {
@@ -267,55 +306,71 @@ const FirebaseManager = {
   },
 
   async saveStripeCard(stripeCard) {
-    if (getCollection('stripe_cards')) {
-      await getCollection('stripe_cards').doc(stripeCard.id).set(stripeCard);
+    if (db) {
+      try {
+        await db.collection('stripe_cards').doc(stripeCard.id).set(stripeCard);
+      } catch (error) {
+        console.error('Firebase saveStripeCard error:', error);
+      }
     }
   },
 
   async getStripeCardsByUserId(userId) {
-    if (getCollection('stripe_cards')) {
-      const snapshot = await getCollection('stripe_cards').where('user_id', '==', userId).get();
-      return snapshot.docs.map(doc => doc.data());
+    if (db) {
+      try {
+        const snapshot = await db.collection('stripe_cards').where('user_id', '==', userId).get();
+        return snapshot.docs.map(doc => doc.data());
+      } catch (error) {
+        console.error('Firebase getStripeCardsByUserId error:', error);
+      }
     }
     return [];
   },
 
-  async getStripeCardById(cardId) {
-    if (getCollection('stripe_cards')) {
-      const doc = await getCollection('stripe_cards').doc(cardId).get();
-      return doc.exists ? doc.data() : null;
-    }
-    return null;
-  },
-
   async saveOrganization(organization) {
-    if (getCollection('organizations')) {
-      await getCollection('organizations').doc(organization._id).set(organization);
-    } else {
-      organizations.set(organization._id, organization);
+    if (db) {
+      try {
+        await db.collection('organizations').doc(organization._id).set(organization);
+        return;
+      } catch (error) {
+        console.error('Firebase saveOrganization error:', error);
+      }
     }
+    organizations.set(organization._id, organization);
   },
 
   async getOrganizationById(orgId) {
-    if (getCollection('organizations')) {
-      const doc = await getCollection('organizations').doc(orgId).get();
-      return doc.exists ? doc.data() : null;
+    if (db) {
+      try {
+        const doc = await db.collection('organizations').doc(orgId).get();
+        return doc.exists ? doc.data() : null;
+      } catch (error) {
+        console.error('Firebase getOrganizationById error:', error);
+      }
     }
     return organizations.get(orgId);
   },
 
   async getAllOrganizations() {
-    if (getCollection('organizations')) {
-      const snapshot = await getCollection('organizations').get();
-      return snapshot.docs.map(doc => doc.data());
+    if (db) {
+      try {
+        const snapshot = await db.collection('organizations').get();
+        return snapshot.docs.map(doc => doc.data());
+      } catch (error) {
+        console.error('Firebase getAllOrganizations error:', error);
+      }
     }
     return Array.from(organizations.values());
   },
 
   async getOrganizationsByUserId(userId) {
-    if (getCollection('organizations')) {
-      const snapshot = await getCollection('organizations').where('members', 'array-contains', { user_id: userId }).get();
-      return snapshot.docs.map(doc => doc.data());
+    if (db) {
+      try {
+        const snapshot = await db.collection('organizations').where('members', 'array-contains', userId).get();
+        return snapshot.docs.map(doc => doc.data());
+      } catch (error) {
+        console.error('Firebase getOrganizationsByUserId error:', error);
+      }
     }
     
     const userOrganizations = [];
@@ -444,7 +499,7 @@ const createStripeCardholder = async () => {
   }
 };
 
-// Auth middleware
+// Improved Auth middleware with better error handling
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -455,21 +510,18 @@ const authenticateToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    
+    // Get user from storage
     const user = users.get(decoded.userId);
     
     if (!user) {
-      return res.status(401).json({ error: 'Invalid token' });
-    }
-
-    const session = sessions.get(decoded.sessionId);
-    if (!session || Date.now() - session.created_at > 3 * 24 * 60 * 60 * 1000) {
-      return res.status(401).json({ error: 'Session expired. Please login again.' });
+      return res.status(401).json({ error: 'User not found' });
     }
 
     req.user = user;
-    req.sessionId = decoded.sessionId;
     next();
   } catch (error) {
+    console.error('Token verification error:', error);
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
 };
@@ -674,18 +726,10 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     // Get user account
     const account = await FirebaseManager.getAccountByUserId(user_id);
 
-    // Create session
-    const sessionId = 'session_' + Date.now();
-    sessions.set(sessionId, {
-      user_id: userData._id,
-      created_at: Date.now()
-    });
-
     // Generate JWT token
     const token = jwt.sign(
       { 
-        userId: userData._id, 
-        sessionId: sessionId 
+        userId: userData._id
       }, 
       JWT_SECRET, 
       { expiresIn: '3d' }
@@ -693,6 +737,9 @@ app.post('/api/auth/verify-otp', async (req, res) => {
 
     // Clean up OTP
     otps.delete(user_id);
+
+    // Store user in memory for session management
+    users.set(userData._id, userData);
 
     res.json({
       message: 'Login successful',
@@ -789,6 +836,9 @@ app.put('/api/profile', authenticateToken, async (req, res) => {
     if (organization_id) req.user.organization_id = organization_id;
 
     await FirebaseManager.saveUser(req.user);
+
+    // Update in-memory user
+    users.set(req.user._id, req.user);
 
     res.json({
       message: 'Profile updated successfully',
@@ -1321,8 +1371,8 @@ app.delete('/api/cards/:cardId', authenticateToken, async (req, res) => {
     }
 
     // Delete card
-    if (getCollection('cards')) {
-      await getCollection('cards').doc(card._id).delete();
+    if (db) {
+      await db.collection('cards').doc(card._id).delete();
     } else {
       cards.delete(card._id);
     }
@@ -1920,8 +1970,8 @@ app.delete('/api/organizations/:orgId/cards/:cardId', authenticateToken, async (
     await FirebaseManager.saveOrganization(organization);
 
     // Also delete the actual card
-    if (getCollection('cards')) {
-      await getCollection('cards').doc(req.params.cardId).delete();
+    if (db) {
+      await db.collection('cards').doc(req.params.cardId).delete();
     } else {
       cards.delete(req.params.cardId);
     }
@@ -2055,6 +2105,8 @@ const initializeDemoData = async () => {
   // Create demo users if none exist
   const existingUsers = await FirebaseManager.getUserByEmail('demo@hcb.com');
   if (!existingUsers) {
+    console.log('🔄 Creating demo users...');
+    
     // Demo user 1
     const demoUserId1 = 'user_demo1';
     const demoUser1 = {
@@ -2068,6 +2120,7 @@ const initializeDemoData = async () => {
       created_at: new Date()
     };
     await FirebaseManager.saveUser(demoUser1);
+    users.set(demoUserId1, demoUser1);
 
     const demoAccountId1 = 'acc_demo1';
     const demoAccount1 = {
@@ -2095,6 +2148,7 @@ const initializeDemoData = async () => {
       created_at: new Date()
     };
     await FirebaseManager.saveUser(demoUser2);
+    users.set(demoUserId2, demoUser2);
 
     const demoAccountId2 = 'acc_demo2';
     const demoAccount2 = {
