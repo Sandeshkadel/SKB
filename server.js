@@ -13,6 +13,20 @@ const Stripe = require('stripe');
 const app = express();
 const server = http.createServer(app);
 
+// Environment variables
+const PORT = process.env.PORT || 3000;
+const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
+const JWT_SECRET = process.env.JWT_SECRET || '4482eab8e42aa27db453de50461a098538751c9cbf58eef712f2e918955f17172bb6e19fa5dcde148aff1d5b4f908ba1';
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_51Ru6f5JNa6A3w8pIwXRPd21C5TEMZ3dpElyW9txFMyTdC0xxoHU6doRwNjeYsbg68tdguoEzCqu0eRQsK8CXJkb8000kCenkQS';
+const STRIPE_RESTRICTED_KEY = process.env.STRIPE_RESTRICTED_KEY || 'rk_test_51Ru6f5JNa6A3w8pIC66USMcZvaD53Rry8nIu7X5tD4Sax3qcJAyZdclBsyxBYkUB3fZI8MaGNQcJEAeP4ZOMzz5000YI4W4fxs';
+
+// Initialize Stripe with restricted key for Issuing
+const stripe = Stripe(STRIPE_RESTRICTED_KEY);
+const CARDHOLDER_ID = process.env.CARDHOLDER_ID;
+
+console.log('🚀 Starting HCB Clone Server with Stripe Issuing...');
+console.log(`💳 Stripe Mode: ${STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE'}`);
+
 // Initialize Firebase Admin
 try {
   const serviceAccount = {
@@ -38,12 +52,6 @@ try {
 } catch (error) {
   console.log('⚠️ Firebase Admin initialization failed, using in-memory storage:', error.message);
 }
-
-// Initialize Stripe
-const stripe = Stripe(process.env.STRIPE_RESTRICTED_KEY);
-const CARDHOLDER_ID = process.env.CARDHOLDER_ID;
-
-console.log('🚀 Starting HCB Clone Server with Stripe Issuing...');
 
 // Configure Socket.IO
 const io = socketIo(server, {
@@ -373,6 +381,7 @@ const sendOTPEmail = async (email, name, otp) => {
 const createStripeCardholder = async () => {
   try {
     if (!CARDHOLDER_ID) {
+      console.log('🔄 Creating Stripe cardholder...');
       const cardholder = await stripe.issuing.cardholders.create({
         name: 'HCB Clone User',
         email: 'support@hcbclone.com',
@@ -401,9 +410,10 @@ const createStripeCardholder = async () => {
       console.log('✅ Stripe Cardholder created:', cardholder.id);
       return cardholder.id;
     }
+    console.log('✅ Using existing Stripe cardholder:', CARDHOLDER_ID);
     return CARDHOLDER_ID;
   } catch (error) {
-    console.error('❌ Failed to create Stripe cardholder:', error);
+    console.error('❌ Failed to create Stripe cardholder:', error.message);
     return null;
   }
 };
@@ -451,7 +461,8 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     message: 'Server is running with Stripe Issuing',
     storage: db ? 'Firebase Firestore' : 'In-memory',
-    stripe: 'Enabled'
+    stripe: 'Enabled',
+    stripe_mode: STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE'
   });
 });
 
@@ -461,8 +472,29 @@ app.get('/api/test', (req, res) => {
     message: 'API is working with Stripe!',
     storage: db ? 'Firebase' : 'In-memory',
     stripe: 'Enabled',
+    stripe_mode: STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE',
     timestamp: new Date().toISOString()
   });
+});
+
+// Stripe test endpoint
+app.get('/api/stripe/test', authenticateToken, async (req, res) => {
+  try {
+    // Test Stripe connection by listing cardholders
+    const cardholders = await stripe.issuing.cardholders.list({limit: 1});
+    
+    res.json({
+      message: 'Stripe connection successful!',
+      stripe_mode: STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE',
+      cardholders_count: cardholders.data.length,
+      can_create_cards: true
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Stripe connection failed',
+      message: error.message
+    });
+  }
 });
 
 // Demo data initialization
@@ -596,6 +628,8 @@ app.post('/api/stripe/create-virtual-card', authenticateToken, async (req, res) 
       return res.status(500).json({ error: 'Stripe cardholder not configured' });
     }
 
+    console.log(`🔄 Creating Stripe virtual card for user: ${req.user.email}`);
+
     // Create virtual card using Stripe Issuing
     const cardParams = {
       cardholder: CARDHOLDER_ID,
@@ -621,6 +655,8 @@ app.post('/api/stripe/create-virtual-card', authenticateToken, async (req, res) 
     };
 
     const stripeCard = await stripe.issuing.cards.create(cardParams);
+
+    console.log(`✅ Stripe card created: ${stripeCard.id}`);
 
     // Store card in Firebase
     const cardData = {
@@ -686,7 +722,13 @@ app.post('/api/stripe/create-virtual-card', authenticateToken, async (req, res) 
     res.json({
       message: 'Real virtual card created successfully via Stripe',
       card: cardData,
-      stripe_card: stripeCard
+      stripe_card: {
+        id: stripeCard.id,
+        last4: stripeCard.last4,
+        brand: stripeCard.brand,
+        status: stripeCard.status,
+        currency: stripeCard.currency
+      }
     });
 
   } catch (error) {
@@ -900,9 +942,6 @@ app.post('/api/organizations/:orgId/stripe-cards', authenticateToken, async (req
   }
 });
 
-// ... (Keep all the existing routes from previous implementation for compatibility)
-// Auth Routes, Profile Routes, Account Routes, etc. remain the same...
-
 // Updated Card Routes to use Stripe
 app.get('/api/cards', authenticateToken, async (req, res) => {
   try {
@@ -955,6 +994,8 @@ app.post('/api/cards', authenticateToken, async (req, res) => {
       return res.status(500).json({ error: 'Stripe cardholder not configured' });
     }
 
+    console.log(`🔄 Creating virtual card via Stripe for: ${req.user.email}`);
+
     // Create virtual card using Stripe Issuing
     const cardParams = {
       cardholder: CARDHOLDER_ID,
@@ -970,6 +1011,8 @@ app.post('/api/cards', authenticateToken, async (req, res) => {
     };
 
     const stripeCard = await stripe.issuing.cards.create(cardParams);
+
+    console.log(`✅ Stripe card created successfully: ${stripeCard.id}`);
 
     // Store in both collections for compatibility
     const cardData = {
@@ -1031,7 +1074,8 @@ app.post('/api/cards', authenticateToken, async (req, res) => {
 
     res.json({
       message: 'Virtual card created successfully via Stripe',
-      card: compatibleCard
+      card: compatibleCard,
+      stripe_card_id: stripeCard.id
     });
 
   } catch (error) {
@@ -1088,32 +1132,34 @@ io.on('connection', (socket) => {
 createStripeCardholder().then(cardholderId => {
   if (cardholderId) {
     console.log('✅ Stripe cardholder ready:', cardholderId);
+    // Store the cardholder ID for future use
+    process.env.CARDHOLDER_ID = cardholderId;
+  } else {
+    console.log('⚠️ Stripe cardholder creation failed - card creation will not work');
   }
 });
 
 // Start server
-const PORT = process.env.PORT || 3000;
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
-
 server.listen(PORT, '0.0.0.0', () => {
   console.log('\n🎉 HCB Clone Server Started Successfully!');
   console.log(`📍 Port: ${PORT}`);
   console.log(`🌐 URL: ${CLIENT_URL}`);
   console.log(`📧 Email: OTPs will be sent to registered emails`);
   console.log(`💾 Storage: ${db ? 'Firebase Firestore' : 'In-memory'}`);
-  console.log(`💳 Stripe: Real virtual cards enabled`);
+  console.log(`💳 Stripe: Real virtual cards enabled (TEST MODE)`);
+  console.log(`🔑 JWT: Authentication enabled`);
   console.log(`\n🔗 Health Check: ${CLIENT_URL}/health`);
   console.log(`🔗 API Test: ${CLIENT_URL}/api/test`);
+  console.log(`🔗 Stripe Test: ${CLIENT_URL}/api/stripe/test`);
   console.log('\n✅ Your banking app is now fully functional with real Stripe cards!');
   console.log('💡 Demo Users:');
   console.log('   - demo@hcb.com (Password: any OTP)');
   console.log('   - user2@hcb.com (Password: any OTP)');
   console.log('   - Or create new account with any email');
-  console.log('\n🆕 New Features Added:');
+  console.log('\n🆕 Stripe Features:');
   console.log('   ✅ Real Stripe virtual card generation');
-  console.log('   ✅ Stripe cardholder management');
+  console.log('   ✅ Stripe Issuing API integration');
   console.log('   ✅ Real card numbers with proper validation');
   console.log('   ✅ Organization Stripe card support');
-  console.log('   ✅ Firebase storage for all card data');
   console.log('   ✅ Enhanced security with Stripe Issuing');
 });
