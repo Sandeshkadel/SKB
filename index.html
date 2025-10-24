@@ -51,7 +51,7 @@
             80%, 100% { content: ''; }
         }
 
-        /* Updated Virtual Card with Electric Border Animation */
+        /* Updated Virtual Card with Electric Border Animation - Matching image 1st */
         .virtual-card {
             background: #1a1a1a;
             border-radius: 16px;
@@ -104,6 +104,86 @@
             background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%);
         }
 
+        /* New Card Design - Matching image 2nd (image.png) */
+        .new-card-design {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 20px;
+            color: white;
+            position: relative;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .new-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+
+        .new-card-balance {
+            font-size: 24px;
+            font-weight: bold;
+            color: white;
+        }
+
+        .new-card-body {
+            flex: 1;
+        }
+
+        .new-card-field {
+            margin-bottom: 15px;
+        }
+
+        .new-card-label {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        .new-card-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            display: block;
+        }
+
+        .new-card-actions {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+            gap: 8px;
+        }
+
+        .new-card-btn {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .new-card-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .card-number-display {
+            font-family: 'Courier New', monospace;
+            letter-spacing: 1px;
+        }
+
         .otp-input {
             width: 50px;
             height: 60px;
@@ -140,60 +220,6 @@
         .organization-card:hover {
             transform: translateY(-3px);
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
-        }
-
-        /* Card content styling to match image 1 */
-        .card-content {
-            background: #1a1a1a;
-            border-radius: 14px;
-            padding: 20px;
-            height: 100%;
-            position: relative;
-            z-index: 1;
-        }
-
-        .card-label {
-            font-size: 12px;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 4px;
-        }
-
-        .card-value {
-            font-size: 16px;
-            font-weight: 600;
-            color: white;
-            margin-bottom: 16px;
-        }
-
-        .card-balance {
-            font-size: 24px;
-            font-weight: bold;
-            color: white;
-            margin: 20px 0;
-        }
-
-        .card-actions {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 20px;
-        }
-
-        .card-action-btn {
-            background: rgba(255, 255, 255, 0.1);
-            border: none;
-            color: white;
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .card-action-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: translateY(-2px);
         }
     </style>
 </head>
@@ -986,39 +1012,35 @@
 
                 return AppState.cards.map(card => `
                     <div class="electric-border mb-4 card-hover" onclick="CardManager.showCardDetailsView('${card._id}')">
-                        <div class="card-content">
-                            <div class="flex justify-between items-start mb-6">
-                                <div class="flex-1">
-                                    <div class="card-label">Card number</div>
-                                    <div class="card-value">${Utils.maskCardNumber(card.card_number)}</div>
+                        <div class="new-card-design">
+                            <div class="new-card-header">
+                                <div class="new-card-balance">${Utils.formatCurrency(card.balance_cents)}</div>
+                            </div>
+                            <div class="new-card-body">
+                                <div class="new-card-field">
+                                    <span class="new-card-label">Card number</span>
+                                    <span class="new-card-value card-number-display">${Utils.maskCardNumber(card.card_number)}</span>
                                 </div>
-                                <div class="text-right">
-                                    <div class="card-label">Sxpiry date</div>
-                                    <div class="card-value">${Utils.formatCardDate(card.expiry_month, card.expiry_year)}</div>
+                                <div class="new-card-field">
+                                    <span class="new-card-label">Name of the card holder</span>
+                                    <span class="new-card-value">${card.card_owner || AppState.user.name}</span>
+                                </div>
+                                <div class="new-card-field">
+                                    <span class="new-card-label">Sxpiry date</span>
+                                    <span class="new-card-value">${Utils.formatCardDate(card.expiry_month, card.expiry_year)}</span>
                                 </div>
                             </div>
-                            
-                            <div class="flex justify-between items-start mb-6">
-                                <div class="flex-1">
-                                    <div class="card-label">Name of the card holder</div>
-                                    <div class="card-value">${card.card_owner || AppState.user.name}</div>
-                                </div>
-                                <div class="text-right">
-                                    <div class="card-balance">${Utils.formatCurrency(card.balance_cents)}</div>
-                                </div>
-                            </div>
-                            
-                            <div class="card-actions">
+                            <div class="new-card-actions">
                                 <button onclick="event.stopPropagation(); CardManager.showFundCardModal('${card._id}')" 
-                                        class="card-action-btn">
+                                        class="new-card-btn">
                                     Addfund
                                 </button>
                                 <button onclick="event.stopPropagation(); CardManager.showCardDetailsView('${card._id}')" 
-                                        class="card-action-btn">
+                                        class="new-card-btn">
                                     Details
                                 </button>
                                 <button onclick="event.stopPropagation(); CardManager.showUpdateOwnerModal('${card._id}')" 
-                                        class="card-action-btn">
+                                        class="new-card-btn">
                                     Edit card
                                 </button>
                             </div>
@@ -1567,39 +1589,35 @@
                             <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 <!-- Card Preview -->
                                 <div class="electric-border">
-                                    <div class="card-content">
-                                        <div class="flex justify-between items-start mb-6">
-                                            <div class="flex-1">
-                                                <div class="card-label">Card number</div>
-                                                <div class="card-value">${Utils.maskCardNumber(card.card_number)}</div>
+                                    <div class="new-card-design">
+                                        <div class="new-card-header">
+                                            <div class="new-card-balance">${Utils.formatCurrency(card.balance_cents)}</div>
+                                        </div>
+                                        <div class="new-card-body">
+                                            <div class="new-card-field">
+                                                <span class="new-card-label">Card number</span>
+                                                <span class="new-card-value card-number-display">${Utils.maskCardNumber(card.card_number)}</span>
                                             </div>
-                                            <div class="text-right">
-                                                <div class="card-label">Sxpiry date</div>
-                                                <div class="card-value">${Utils.formatCardDate(card.expiry_month, card.expiry_year)}</div>
+                                            <div class="new-card-field">
+                                                <span class="new-card-label">Name of the card holder</span>
+                                                <span class="new-card-value">${card.card_owner || AppState.user.name}</span>
+                                            </div>
+                                            <div class="new-card-field">
+                                                <span class="new-card-label">Sxpiry date</span>
+                                                <span class="new-card-value">${Utils.formatCardDate(card.expiry_month, card.expiry_year)}</span>
                                             </div>
                                         </div>
-                                        
-                                        <div class="flex justify-between items-start mb-6">
-                                            <div class="flex-1">
-                                                <div class="card-label">Name of the card holder</div>
-                                                <div class="card-value">${card.card_owner || AppState.user.name}</div>
-                                            </div>
-                                            <div class="text-right">
-                                                <div class="card-balance">${Utils.formatCurrency(card.balance_cents)}</div>
-                                            </div>
-                                        </div>
-                                        
-                                        <div class="card-actions">
+                                        <div class="new-card-actions">
                                             <button onclick="CardManager.showFundCardModal('${card._id}')" 
-                                                    class="card-action-btn">
+                                                    class="new-card-btn">
                                                 Addfund
                                             </button>
                                             <button onclick="CardManager.showCardDetailsView('${card._id}')" 
-                                                    class="card-action-btn">
+                                                    class="new-card-btn">
                                                 Details
                                             </button>
                                             <button onclick="CardManager.showUpdateOwnerModal('${card._id}')" 
-                                                    class="card-action-btn">
+                                                    class="new-card-btn">
                                                 Edit card
                                             </button>
                                         </div>
@@ -2078,36 +2096,32 @@
                         </div>
                         <div class="p-6">
                             <div class="electric-border mb-4">
-                                <div class="card-content">
-                                    <div class="flex justify-between items-start mb-6">
-                                        <div class="flex-1">
-                                            <div class="card-label">Card number</div>
-                                            <div class="card-value">${Utils.maskCardNumber(card.card_number)}</div>
+                                <div class="new-card-design">
+                                    <div class="new-card-header">
+                                        <div class="new-card-balance">${Utils.formatCurrency(card.balance_cents)}</div>
+                                    </div>
+                                    <div class="new-card-body">
+                                        <div class="new-card-field">
+                                            <span class="new-card-label">Card number</span>
+                                            <span class="new-card-value card-number-display">${Utils.maskCardNumber(card.card_number)}</span>
                                         </div>
-                                        <div class="text-right">
-                                            <div class="card-label">Sxpiry date</div>
-                                            <div class="card-value">${Utils.formatCardDate(card.expiry_month, card.expiry_year)}</div>
+                                        <div class="new-card-field">
+                                            <span class="new-card-label">Name of the card holder</span>
+                                            <span class="new-card-value">${card.card_owner || AppState.user.name}</span>
+                                        </div>
+                                        <div class="new-card-field">
+                                            <span class="new-card-label">Sxpiry date</span>
+                                            <span class="new-card-value">${Utils.formatCardDate(card.expiry_month, card.expiry_year)}</span>
                                         </div>
                                     </div>
-                                    
-                                    <div class="flex justify-between items-start mb-6">
-                                        <div class="flex-1">
-                                            <div class="card-label">Name of the card holder</div>
-                                            <div class="card-value">${card.card_owner || AppState.user.name}</div>
-                                        </div>
-                                        <div class="text-right">
-                                            <div class="card-balance">${Utils.formatCurrency(card.balance_cents)}</div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="card-actions">
-                                        <button class="card-action-btn">
+                                    <div class="new-card-actions">
+                                        <button class="new-card-btn">
                                             Addfund
                                         </button>
-                                        <button class="card-action-btn">
+                                        <button class="new-card-btn">
                                             Details
                                         </button>
-                                        <button class="card-action-btn">
+                                        <button class="new-card-btn">
                                             Edit card
                                         </button>
                                     </div>
@@ -2429,20 +2443,20 @@
                                             ${org.cards && org.cards.length > 0 ? 
                                                 org.cards.map(card => `
                                                     <div class="electric-border p-4 mb-3">
-                                                        <div class="card-content">
-                                                            <div class="flex justify-between items-center">
-                                                                <div>
-                                                                    <div class="card-label">Card number</div>
-                                                                    <div class="card-value">${Utils.maskCardNumber(card.card_number)}</div>
-                                                                </div>
-                                                                <div class="text-right">
-                                                                    <div class="card-balance">${Utils.formatCurrency(card.balance_cents)}</div>
+                                                        <div class="new-card-design">
+                                                            <div class="new-card-header">
+                                                                <div class="new-card-balance">${Utils.formatCurrency(card.balance_cents)}</div>
+                                                            </div>
+                                                            <div class="new-card-body">
+                                                                <div class="new-card-field">
+                                                                    <span class="new-card-label">Card number</span>
+                                                                    <span class="new-card-value card-number-display">${Utils.maskCardNumber(card.card_number)}</span>
                                                                 </div>
                                                             </div>
                                                             ${isOwner && `
-                                                                <div class="card-actions mt-3">
+                                                                <div class="new-card-actions">
                                                                     <button onclick="OrganizationManager.deleteOrganizationCard('${org._id}', '${card._id}')" 
-                                                                            class="card-action-btn bg-red-600 hover:bg-red-700">
+                                                                            class="new-card-btn bg-red-600 hover:bg-red-700">
                                                                         Delete
                                                                     </button>
                                                                 </div>
