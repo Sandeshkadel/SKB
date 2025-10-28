@@ -104,7 +104,7 @@
             background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%);
         }
 
-        /* New Card Design - Matching image 2nd (image.png) */
+        /* New Card Design - Matching image.png exactly */
         .new-card-design {
             background: #1a1a1a;
             border-radius: 12px;
@@ -115,6 +115,7 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
+            border: 1px solid #333;
         }
 
         .new-card-header {
@@ -556,8 +557,9 @@
                     const email = formData.get('email');
 
                     try {
-                        const data = await ApiService.post('/api/auth/login', { email });
-                        AppState.loginData = data;
+                        // Use the new OTP endpoint
+                        const data = await ApiService.post('/api/send-otp', { email });
+                        AppState.loginData = { email: email };
                         this.renderOTPScreen();
                     } catch (error) {
                         Utils.showToast(error.message, 'error');
@@ -577,8 +579,9 @@
                     const phone = formData.get('phone');
 
                     try {
-                        const data = await ApiService.post('/api/auth/signup', { email, name, phone });
-                        AppState.loginData = data;
+                        // Use the new OTP endpoint for signup too
+                        const data = await ApiService.post('/api/send-otp', { email });
+                        AppState.loginData = { email: email, name: name, phone: phone, isSignup: true };
                         Utils.showToast('OTP sent to your email!', 'success');
                         this.renderOTPScreen();
                     } catch (error) {
@@ -598,7 +601,7 @@
                                 <h2 class="text-3xl font-bold text-gray-900">Enter OTP</h2>
                                 <p class="mt-2 text-gray-600">We've sent a 6-digit code to your email</p>
                                 <p class="text-sm text-purple-600 font-medium mt-1">${AppState.loginData.email}</p>
-                                ${AppState.loginData.email.includes('demo') ? `
+                                ${AppState.loginData.email.includes('demo') || AppState.loginData.email.includes('user2') ? `
                                     <div class="mt-2 p-2 bg-yellow-50 rounded text-xs text-yellow-700">
                                         <i class="fas fa-info-circle mr-1"></i>
                                         For demo accounts, use any 6-digit OTP
@@ -676,8 +679,9 @@
                     }
 
                     try {
-                        const data = await ApiService.post('/api/auth/verify-otp', {
-                            user_id: AppState.loginData.user_id,
+                        // Use the new OTP verification endpoint
+                        const data = await ApiService.post('/api/verify-otp', {
+                            email: AppState.loginData.email,
                             otp: otp
                         });
 
@@ -687,7 +691,7 @@
                         
                         localStorage.setItem('authToken', data.token);
                         
-                        Utils.showToast('Login successful!', 'success');
+                        Utils.showToast(data.message || 'Login successful!', 'success');
                         DashboardManager.initialize();
                         
                     } catch (error) {
@@ -703,8 +707,8 @@
                 resendOtp.addEventListener('click', async () => {
                     Utils.showLoading();
                     try {
-                        await ApiService.post('/api/auth/resend-otp', {
-                            user_id: AppState.loginData.user_id
+                        await ApiService.post('/api/send-otp', {
+                            email: AppState.loginData.email
                         });
                         Utils.showToast('New OTP sent to your email', 'success');
                     } catch (error) {
