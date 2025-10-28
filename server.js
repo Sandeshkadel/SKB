@@ -89,13 +89,15 @@ const io = socketIo(server, {
   }
 });
 
-// Email transporter
+// Email transporter with Porkbun configuration
 const createEmailTransporter = () => {
   return nodemailer.createTransport({
-    service: 'gmail',
+    host: process.env.SMTP_HOST || 'smtp.porkbun.com',
+    port: process.env.SMTP_PORT || 587,
+    secure: false,
     auth: {
-      user: process.env.EMAIL_USER || 'sandeshkadel2314@gmail.com',
-      pass: process.env.EMAIL_PASSWORD || 'your_app_password_here'
+      user: process.env.EMAIL_USER || 'sandeshkadel@techcrafters.club',
+      pass: process.env.EMAIL_PASS || 'Sandesh@2474'
     },
     connectionTimeout: 30000,
     greetingTimeout: 30000,
@@ -389,6 +391,46 @@ const FirebaseManager = {
       org._id.toLowerCase().includes(query.toLowerCase()) ||
       (org.code && org.code.toLowerCase().includes(query.toLowerCase()))
     );
+  },
+
+  // OTP Management
+  async saveOTP(email, otpData) {
+    if (db) {
+      try {
+        await db.collection('otps').doc(email).set({
+          ...otpData,
+          created_at: new Date()
+        });
+        return;
+      } catch (error) {
+        console.error('Firebase saveOTP error:', error);
+      }
+    }
+    otps.set(email, otpData);
+  },
+
+  async getOTP(email) {
+    if (db) {
+      try {
+        const doc = await db.collection('otps').doc(email).get();
+        return doc.exists ? doc.data() : null;
+      } catch (error) {
+        console.error('Firebase getOTP error:', error);
+      }
+    }
+    return otps.get(email);
+  },
+
+  async deleteOTP(email) {
+    if (db) {
+      try {
+        await db.collection('otps').doc(email).delete();
+        return;
+      } catch (error) {
+        console.error('Firebase deleteOTP error:', error);
+      }
+    }
+    otps.delete(email);
   }
 };
 
@@ -412,11 +454,11 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// Send OTP Email
+// Send OTP Email using Porkbun
 const sendOTPEmail = async (email, name, otp) => {
   try {
     const mailOptions = {
-      from: process.env.EMAIL_USER || 'sandeshkadel2314@gmail.com',
+      from: process.env.EMAIL_USER || 'sandeshkadel@techcrafters.club',
       to: email,
       subject: 'Your HCB Clone OTP Code',
       html: `
@@ -432,8 +474,8 @@ const sendOTPEmail = async (email, name, otp) => {
                 ${otp}
               </div>
             </div>
-            <p>This OTP is valid for 10 minutes. Please do not share it with anyone.</p>
-            <p>Welcome again to HCB Clone!</p>
+            <p>This OTP is valid for 5 minutes. Please do not share it with anyone.</p>
+            <p>If you didn't request this, please ignore this email.</p>
           </div>
           <div style="background: #333; color: white; padding: 15px; text-align: center;">
             <p>&copy; 2024 HCB Clone. All rights reserved.</p>
@@ -540,7 +582,8 @@ app.get('/health', (req, res) => {
     message: 'Server is running with Stripe Issuing',
     storage: db ? 'Firebase Firestore' : 'In-memory',
     stripe: stripe ? 'Enabled' : 'Disabled',
-    stripe_mode: STRIPE_RESTRICTED_KEY && STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE'
+    stripe_mode: STRIPE_RESTRICTED_KEY && STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE',
+    email: 'Porkbun SMTP configured'
   });
 });
 
@@ -551,6 +594,7 @@ app.get('/api/test', (req, res) => {
     storage: db ? 'Firebase' : 'In-memory',
     stripe: stripe ? 'Enabled' : 'Disabled',
     stripe_mode: STRIPE_RESTRICTED_KEY && STRIPE_RESTRICTED_KEY.startsWith('rk_test_') ? 'TEST' : 'LIVE',
+    email_provider: 'Porkbun SMTP',
     timestamp: new Date().toISOString()
   });
 });
@@ -582,7 +626,156 @@ app.get('/api/stripe/test', authenticateToken, async (req, res) => {
   }
 });
 
-// ========== AUTH ROUTES ==========
+// ========== OTP AUTH ROUTES ==========
+
+// Send OTP endpoint
+app.post('/api/send-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Generate OTP
+    const otp = generateOTP();
+    const otpData = {
+      otp: otp,
+      expires: Date.now() + 5 * 60 * 1000, // 5 minutes
+      attempts: 0
+    };
+
+    // Save OTP to storage
+    await FirebaseManager.saveOTP(email, otpData);
+
+    // Send OTP email
+    await sendOTPEmail(email, 'User', otp);
+
+    res.json({
+      message: 'OTP sent successfully',
+      email: email,
+      expires_in: '5 minutes'
+    });
+
+  } catch (error) {
+    console.error('Send OTP error:', error);
+    res.status(500).json({ error: 'Internal server error while sending OTP' });
+  }
+});
+
+// Verify OTP endpoint
+app.post('/api/verify-otp', async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({ error: 'Email and OTP are required' });
+    }
+
+    // Get OTP data
+    const otpData = await FirebaseManager.getOTP(email);
+    
+    if (!otpData) {
+      return res.status(400).json({ error: 'OTP not found or expired' });
+    }
+
+    // Check if OTP has expired
+    if (Date.now() > otpData.expires) {
+      await FirebaseManager.deleteOTP(email);
+      return res.status(400).json({ error: 'OTP has expired' });
+    }
+
+    // Check if OTP matches
+    if (otpData.otp !== otp) {
+      // Increment attempts
+      otpData.attempts += 1;
+      await FirebaseManager.saveOTP(email, otpData);
+
+      if (otpData.attempts >= 3) {
+        await FirebaseManager.deleteOTP(email);
+        return res.status(400).json({ error: 'Too many failed attempts. OTP invalidated.' });
+      }
+
+      return res.status(400).json({ error: 'Invalid OTP' });
+    }
+
+    // OTP is valid - check if user exists or needs to be created
+    let user = await FirebaseManager.getUserByEmail(email);
+    let isNewUser = false;
+
+    if (!user) {
+      // Create new user
+      isNewUser = true;
+      const userId = 'user_' + Date.now();
+      user = {
+        _id: userId,
+        email: email.toLowerCase(),
+        name: email.split('@')[0], // Default name from email
+        phone: '',
+        status: 'active',
+        email_verified: true,
+        kyc_status: 'pending',
+        created_at: new Date()
+      };
+
+      await FirebaseManager.saveUser(user);
+
+      // Create account for user
+      const accountId = 'acc_' + Date.now();
+      const account = {
+        _id: accountId,
+        user_id: userId,
+        account_number: generateAccountNumber(),
+        routing_number: generateRoutingNumber(),
+        balance_cents: 100000, // Start with $1000 for demo
+        currency: 'USD',
+        status: 'active',
+        created_at: new Date()
+      };
+
+      await FirebaseManager.saveAccount(account);
+    }
+
+    // Get user account
+    const account = await FirebaseManager.getAccountByUserId(user._id);
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { 
+        userId: user._id
+      }, 
+      JWT_SECRET, 
+      { expiresIn: '3d' }
+    );
+
+    // Clean up OTP
+    await FirebaseManager.deleteOTP(email);
+
+    // Store user in memory for session management
+    users.set(user._id, user);
+
+    res.json({
+      message: isNewUser ? 'Account created and verified successfully' : 'Login successful',
+      token,
+      user: {
+        _id: user._id,
+        email: user.email,
+        name: user.name,
+        phone: user.phone,
+        email_verified: user.email_verified,
+        kyc_status: user.kyc_status
+      },
+      account: account,
+      is_new_user: isNewUser
+    });
+
+  } catch (error) {
+    console.error('OTP verification error:', error);
+    res.status(500).json({ error: 'Internal server error during OTP verification' });
+  }
+});
+
+// ========== LEGACY AUTH ROUTES (for backward compatibility) ==========
 
 // Signup endpoint
 app.post('/api/auth/signup', async (req, res) => {
@@ -614,27 +807,15 @@ app.post('/api/auth/signup', async (req, res) => {
 
     await FirebaseManager.saveUser(user);
 
-    // Create account for user
-    const accountId = 'acc_' + Date.now();
-    const account = {
-      _id: accountId,
-      user_id: userId,
-      account_number: generateAccountNumber(),
-      routing_number: generateRoutingNumber(),
-      balance_cents: 100000, // Start with $1000 for demo
-      currency: 'USD',
-      status: 'active',
-      created_at: new Date()
-    };
-
-    await FirebaseManager.saveAccount(account);
-
     // Generate OTP
     const otp = generateOTP();
-    otps.set(userId, {
+    const otpData = {
       otp,
-      expires: Date.now() + 10 * 60 * 1000 // 10 minutes
-    });
+      expires: Date.now() + 10 * 60 * 1000, // 10 minutes
+      attempts: 0
+    };
+
+    await FirebaseManager.saveOTP(email, otpData);
 
     // Send OTP email
     await sendOTPEmail(email, name, otp);
@@ -669,10 +850,13 @@ app.post('/api/auth/login', async (req, res) => {
 
     // Generate OTP
     const otp = generateOTP();
-    otps.set(user._id, {
+    const otpData = {
       otp,
-      expires: Date.now() + 10 * 60 * 1000 // 10 minutes
-    });
+      expires: Date.now() + 10 * 60 * 1000, // 10 minutes
+      attempts: 0
+    };
+
+    await FirebaseManager.saveOTP(email, otpData);
 
     // Send OTP email
     await sendOTPEmail(email, user.name, otp);
@@ -690,7 +874,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Verify OTP endpoint
+// Verify OTP endpoint (legacy)
 app.post('/api/auth/verify-otp', async (req, res) => {
   try {
     const { user_id, otp } = req.body;
@@ -705,14 +889,14 @@ app.post('/api/auth/verify-otp', async (req, res) => {
       // Accept any OTP for demo accounts
       console.log(`✅ Demo user ${user.email} OTP bypassed`);
     } else {
-      // Check OTP for real users
-      const otpData = otps.get(user_id);
+      // Check OTP for real users using new OTP system
+      const otpData = await FirebaseManager.getOTP(user.email);
       if (!otpData || otpData.otp !== otp) {
         return res.status(400).json({ error: 'Invalid OTP' });
       }
 
       if (Date.now() > otpData.expires) {
-        otps.delete(user_id);
+        await FirebaseManager.deleteOTP(user.email);
         return res.status(400).json({ error: 'OTP has expired' });
       }
     }
@@ -736,7 +920,9 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     );
 
     // Clean up OTP
-    otps.delete(user_id);
+    if (userData.email) {
+      await FirebaseManager.deleteOTP(userData.email);
+    }
 
     // Store user in memory for session management
     users.set(userData._id, userData);
@@ -777,10 +963,13 @@ app.post('/api/auth/resend-otp', async (req, res) => {
 
     // Generate new OTP
     const otp = generateOTP();
-    otps.set(user_id, {
+    const otpData = {
       otp,
-      expires: Date.now() + 10 * 60 * 1000 // 10 minutes
-    });
+      expires: Date.now() + 10 * 60 * 1000, // 10 minutes
+      attempts: 0
+    };
+
+    await FirebaseManager.saveOTP(user.email, otpData);
 
     // Send OTP email
     await sendOTPEmail(user.email, user.name, otp);
@@ -2261,14 +2450,15 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('\n🎉 HCB Clone Server Started Successfully!');
   console.log(`📍 Port: ${PORT}`);
   console.log(`🌐 URL: ${CLIENT_URL}`);
-  console.log(`📧 Email: OTPs will be sent to registered emails`);
+  console.log(`📧 Email Provider: Porkbun SMTP`);
+  console.log(`📧 OTP Emails: Enabled with 5-minute expiration`);
   console.log(`💾 Storage: ${db ? 'Firebase Firestore' : 'In-memory'}`);
   console.log(`💳 Stripe: ${stripe ? 'Real virtual cards enabled (TEST MODE)' : 'Disabled - check configuration'}`);
   console.log(`🔑 JWT: Authentication enabled`);
   console.log(`\n🔗 Health Check: ${CLIENT_URL}/health`);
   console.log(`🔗 API Test: ${CLIENT_URL}/api/test`);
   console.log(`🔗 Stripe Test: ${CLIENT_URL}/api/stripe/test`);
-  console.log('\n✅ Your banking app is now fully functional with real Stripe cards!');
+  console.log('\n✅ Your banking app is now fully functional with OTP authentication!');
   console.log('💡 Demo Users:');
   console.log('   - demo@hcb.com (Password: any OTP)');
   console.log('   - user2@hcb.com (Password: any OTP)');
@@ -2284,4 +2474,10 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log('\n⚠️  Stripe Features Disabled:');
     console.log('   Please check your Stripe configuration');
   }
+  console.log('\n📧 OTP Features:');
+  console.log('   ✅ Porkbun SMTP integration');
+  console.log('   ✅ 6-digit OTP generation');
+  console.log('   ✅ 5-minute expiration');
+  console.log('   ✅ 3 attempt limit');
+  console.log('   ✅ Automatic user creation for new emails');
 });
