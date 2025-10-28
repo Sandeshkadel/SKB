@@ -89,6 +89,15 @@ const io = socketIo(server, {
   }
 });
 
+// Middleware - MUST BE BEFORE ROUTES
+app.use(cors({
+  origin: CLIENT_URL,
+  credentials: true
+}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.static(__dirname));
+
 // Improved Email Transporter with better configuration and fallbacks
 const createEmailTransporter = () => {
   // Try Gmail first if credentials are available
@@ -126,17 +135,19 @@ const createEmailTransporter = () => {
     });
   }
 
-  // Fallback to Ethereal.email for testing
-  console.log('📧 Using Ethereal.email test SMTP (no emails will actually be sent)');
-  return nodemailer.createTransport({
-    host: 'smtp.ethereal.email',
-    port: 587,
-    secure: false,
-    auth: {
-      user: 'test@ethereal.email',
-      pass: 'test'
-    }
-  });
+  // Fallback to console logging only
+  console.log('📧 No email configuration found - OTPs will be logged to console only');
+  return {
+    sendMail: (options) => {
+      console.log('📧 Email would be sent:', {
+        to: options.to,
+        subject: options.subject,
+        text: options.text || 'Check console for OTP'
+      });
+      return Promise.resolve({ messageId: 'console-only' });
+    },
+    verify: () => Promise.resolve(true)
+  };
 };
 
 let emailTransporter = createEmailTransporter();
@@ -513,7 +524,8 @@ const sendOTPEmail = async (email, name, otp) => {
             <p>&copy; 2024 HCB Clone. All rights reserved.</p>
           </div>
         </div>
-      `
+      `,
+      text: `Your HCB Clone OTP is: ${otp}. This OTP is valid for 5 minutes.`
     };
 
     // Try to send email, but don't fail the request if email fails
@@ -673,6 +685,8 @@ app.get('/api/stripe/test', authenticateToken, async (req, res) => {
 // Send OTP endpoint with improved error handling
 app.post('/api/send-otp', async (req, res) => {
   try {
+    console.log('📧 Send OTP request received:', req.body);
+    
     const { email } = req.body;
 
     if (!email) {
@@ -709,6 +723,8 @@ app.post('/api/send-otp', async (req, res) => {
 // Verify OTP endpoint
 app.post('/api/verify-otp', async (req, res) => {
   try {
+    console.log('✅ Verify OTP request received:', req.body);
+    
     const { email, otp } = req.body;
 
     if (!email || !otp) {
@@ -2493,7 +2509,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('\n🎉 HCB Clone Server Started Successfully!');
   console.log(`📍 Port: ${PORT}`);
   console.log(`🌐 URL: ${CLIENT_URL}`);
-  console.log(`📧 Email Provider: SMTP with fallback to console logging`);
+  console.log(`📧 Email Provider: Console logging (OTPs will be shown in logs)`);
   console.log(`📧 OTP Emails: Enabled with 5-minute expiration`);
   console.log(`💾 Storage: ${db ? 'Firebase Firestore' : 'In-memory'}`);
   console.log(`💳 Stripe: ${stripe ? 'Real virtual cards enabled (TEST MODE)' : 'Disabled - check configuration'}`);
